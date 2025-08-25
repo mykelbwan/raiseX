@@ -1,0 +1,6 @@
+Best practice in writing smart contracts that hold peoples money
+    checks
+    effects 
+    interaction
+
+Write code with security im mind
