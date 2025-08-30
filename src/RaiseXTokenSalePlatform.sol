@@ -5,6 +5,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
 
 error RaiseX__ErrorMissingParam();
 error RaiseX__ErrorInvalidPresaleId();
@@ -63,37 +64,37 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         uint256 startTime;
         uint256 endTime;
         uint256 amountRaised;
+        // Whitelist
+        uint256 whiteListSaleStartTime;
+        uint256 whitelistSaleEndTime;
         // Token info
         address token; // token being sold
         address raiseToken; // ETH/BNB or ERC20 used to raise
         address owner;
-        // Whitelist
-        bool whiteListSale; // @notice applies only for fixed sales
-        uint256 whiteListSaleStartTime;
-        uint256 whitelistSaleEndTime;
         // Status flags
         bool presaleFilled;
         bool finalized;
         bool cancelled;
         bool presaleFundsWithdrawn;
         bool leftOverTokensWithdrawn;
+        // Whitelist
+        bool whiteListSale; // @notice applies only for fixed sales
     }
 
     mapping(uint256 presaleId => Presale) private presale;
     mapping(uint256 presaleId => mapping(address contributor => uint256 contribution))
         private contributed; // funds
-    mapping(uint256 presaleId => mapping(address contributor => uint256 claimedAmountInFixedPresaleCauseTokensAreComputedOnTheSpot))
-        private claimable; // tokens
+    mapping(uint256 presaleId => mapping(address contributor => uint256 amount))
+        private claimable; // amount in fixed presale. tokens are computed on contributing
     mapping(uint256 => mapping(address => bool)) private isWhitelisted;
     mapping(address token => uint256 amount) private totalRaisedByToken;
-    uint256 public totalProjectsRaised;
     mapping(uint256 => bool) presaleCounted; // track which presaleIDs have already been counted
 
-    uint256 private presaleCounter;
-    uint16 private maxWhitelistBatch = 100; // default 100, can be updated by owner
-    address[] private numOfProjects;
+    uint256 public totalProjectsRaised; // track total number of projects that have raised on the platform
+    uint256 private presaleCounter; // incremented at each presale creation
     address private feeAddress;
     address private pullOutPenaltyFeeAddress;
+    uint16 private maxWhitelistBatch = 100; // default 100, can be updated by owner
     uint8 private platformFee = 2; //@notice fee can be updated up to 10%
     uint8 private constant PRESALE_PULL_OUT_PENALTY_FEE = 2; // @notice fee cannot be changed
 
@@ -166,14 +167,6 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             revert RaiseX__ErrorAddressCannotBeZeroAddress();
         feeAddress = _feeAddress;
         pullOutPenaltyFeeAddress = _pullOutPenaltyAddress;
-    }
-
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
     }
 
     function createPresale(
@@ -276,7 +269,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         newPresale.whiteListSaleStartTime = wlStart;
         newPresale.whitelistSaleEndTime = wlEnd;
 
-        // Transfer presale tokens from owner into contract for escrow
+        // Transfer presale tokens from owner to contract
         IERC20(tokenAddress).safeTransferFrom(
             presaleOwner,
             address(this),
@@ -306,11 +299,10 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
 
-        // ---------- 1) Presale active window ----------
+        // Presale active window
         if (block.timestamp < p.startTime || block.timestamp > p.endTime)
             revert RaiseX__ErrorPresaleNotActive();
 
-        // ---------- 2) Normalize input amounts & basic validation ----------
         uint256 amountIn;
         if (p.raiseToken == address(0)) {
             // Native presale: value must be provided in msg.value
@@ -323,18 +315,18 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             if (amountIn == 0) revert RaiseX__ErrorInvalidAmount();
         }
 
-        // ---------- 3) Branch by presale type ----------
+        // Branch by presale type
         if (p.presaleType == PresaleType.Fixed) {
-            // --- Fixed presale: enforce hardCap and allocate claimable tokens ---
+            // Fixed presale: enforce hardCap and allocate claimable tokens
 
-            // --- Whitelist enforcement for fixed presales ---
+            // Whitelist enforcement for fixed presales
             if (p.whiteListSale) {
-                // 1) Too early: presale not open for anyone yet
+                // Too early: presale not open for anyone yet
                 if (block.timestamp < p.whiteListSaleStartTime) {
                     revert RaiseX__ErrorPresaleNotStarted();
                 }
 
-                // 2) Within whitelist window: must be whitelisted
+                // Within whitelist window: must be whitelisted
                 if (
                     block.timestamp >= p.whiteListSaleStartTime &&
                     block.timestamp <= p.whitelistSaleEndTime
@@ -344,7 +336,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
                     }
                 }
 
-                // 3) After whitelistSaleEndTime: open to everyone, no restriction
+                // After whitelistSaleEndTime: open to everyone, no restriction
             }
 
             // check if presale already marked as filled
@@ -367,7 +359,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             uint256 available = p.hardCap - p.amountRaised;
             uint256 take = amountIn > available ? available : amountIn; // accepted amount
 
-            // --- Transfer funds in for ERC20 only (transfer only the accepted 'take') ---
+            // Transfer funds in for ERC20 only (transfer only the accepted 'take')
             if (p.raiseToken != address(0)) {
                 // Pull only the accepted amount; avoids needing to refund ERC20
                 IERC20(p.raiseToken).safeTransferFrom(
@@ -377,22 +369,22 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
                 );
             }
 
-            // --- Compute token allocation for the accepted amount ---
+            // Compute token allocation for the accepted amount
             uint256 tokenAmount = _calculateFixedPresaleAmount(
                 take,
                 p.tokensForSale,
                 p.hardCap
             );
 
-            // Safety cap: ensure tokensSold doesn't exceed tokensForSale (handle rounding)
+            // Safety cap: ensure tokensSold doesn't exceed tokensForSale
             uint256 newTokensSold = p.tokensSold + tokenAmount;
             if (newTokensSold > p.tokensForSale) {
-                // reduce tokenAmount to remaining tokens (defensive)
+                // reduce tokenAmount to remaining tokens
                 tokenAmount = p.tokensForSale - p.tokensSold;
                 newTokensSold = p.tokensForSale;
             }
 
-            // ---------- 4) Update state BEFORE performing native refunds or any further external actions ----------
+            // Update state BEFORE performing native refunds or any further external actions
             p.amountRaised += take;
             p.tokensSold = newTokensSold;
             contributed[presaleId][contributor] += take;
@@ -401,7 +393,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             // Mark presale filled if we've reached the hard cap
             if (p.amountRaised >= p.hardCap) p.presaleFilled = true;
 
-            // ---------- 5) Handle native refund (if any excess sent) ----------
+            // Handle native refund (if any excess sent)
             if (p.raiseToken == address(0) && take < amountIn) {
                 uint256 refund = amountIn - take;
                 (bool ok, ) = payable(contributor).call{value: refund}("");
@@ -410,7 +402,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
             emit ParticipatedInFixedPresale(contributor, presaleId, take);
         } else if (p.presaleType == PresaleType.Dynamic) {
-            // --- Dynamic presale: accept contributions; allocations occur at finalization ---
+            // Dynamic presale: accept contributions; allocations occur at finalization
 
             if (amountIn < p.minContribution)
                 revert RaiseX__ErrorInvalidAmount();
@@ -475,13 +467,16 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.raiseToken == address(0)) {
             // Refund native token (ETH/BNB/etc.)
+            // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             (bool ok, ) = payable(pullOutPenaltyFeeAddress).call{value: fee}(
                 ""
             );
+
             (ok, ) = payable(sender).call{value: refund}("");
             if (!ok) revert RaiseX__ErrorRefundFailed();
         } else {
             // Refund ERC20 token
+             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             IERC20(p.raiseToken).safeTransfer(pullOutPenaltyFeeAddress, fee);
             IERC20(p.raiseToken).safeTransfer(sender, refund);
         }
@@ -711,12 +706,14 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.raiseToken == address(0)) {
             // Native token withdrawal (e.g. ETH/BNB)
+             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             (bool ok1, ) = payable(feeAddress).call{value: fee}("");
             if (!ok1) revert RaiseX__ErrorWithdrawFailed();
             (bool ok2, ) = payable(p.owner).call{value: payout}("");
             if (!ok2) revert RaiseX__ErrorWithdrawFailed();
         } else {
             // ERC20 token withdrawal
+             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             IERC20(p.raiseToken).safeTransfer(feeAddress, fee);
             IERC20(p.raiseToken).safeTransfer(p.owner, payout);
         }
@@ -755,6 +752,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         uint256 payout = leftover - fee;
 
         // Transfer tokens
+         // TODO instead of sending platform fee every time, increment it and withdraw them any time.
         IERC20(p.token).safeTransfer(feeAddress, fee);
         IERC20(p.token).safeTransfer(p.owner, payout);
 
@@ -862,6 +860,14 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         }
 
         emit WhitelistedAddressesRemoved(presaleId);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     /// Getter functions

@@ -2,19 +2,19 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
-import {RaiseXTokenSalePlatform} from "../src/RaiseXTokenSalePlatform.sol";
+import {RaiseXGuessingGame} from "../src/RGG.sol";
 
-contract DeployRaiseXTokenSalePlatformScript is Script {
-    function run() public returns (RaiseXTokenSalePlatform) {
+contract DeployRNGGScript is Script {
+    function run() public returns (RaiseXGuessingGame) {
         address initialOwner = msg.sender;
         address feeAddress = msg.sender;
+
         vm.startBroadcast();
-        RaiseXTokenSalePlatform newRaiseX = new RaiseXTokenSalePlatform(
+        RaiseXGuessingGame newRaiseXGuessingGame = new RaiseXGuessingGame(
             initialOwner,
-            feeAddress,
             feeAddress
         );
         vm.stopBroadcast();
-        return newRaiseX;
+        return newRaiseXGuessingGame;
     }
 }

@@ -6,12 +6,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
 
 error InvalidTimeRange();
 error ReserveMustBeGreaterThanZero();
 error UnAuthorized();
 
-contract RaiseXNft is Ownable, ReentrancyGuard {
+contract RaiseXNftAuctionPlatform is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct Auction {
