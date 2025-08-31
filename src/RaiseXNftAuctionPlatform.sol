@@ -5,68 +5,157 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
 
 error InvalidTimeRange();
 error ReserveMustBeGreaterThanZero();
 error UnAuthorized();
+error ContractPaused();
+error AuctionNotStarted();
+error AuctionEnded();
+error AuctionAlreadySettled();
+error BidsAlreadyPlaced();
+error PaymentFail();
+error AuctionStillActive();
+error BidTooLow();
+error EthMisMatch();
+error AuctionTooShort();
+error NotNftOwner();
+error NotApprovedForTransfer();
+error ZeroAddress();
 
-contract RaiseXNftAuctionPlatform is Ownable, ReentrancyGuard {
+contract RaiseXNftAuctionPlatform is
+    Ownable,
+    ReentrancyGuard,
+    Pausable,
+    ContractTransparencyConfig
+{
     using SafeERC20 for IERC20;
 
     struct Auction {
-        // Identification
-        uint256 auctionId;
-        address owner; // Seller
-        address nftAddress; // NFT contract
-        uint256 tokenId; // NFT being auctioned
-        // Auction Rules
-        uint256 reservePrice; // Minimum acceptable price (auction won't settle below this)
-        uint256 minBidIncrement; // Minimum increment for next bids
-        uint256 buyoutPrice; // Optional instant purchase price (0 if disabled)
-        // Timing
-        uint256 startTime; // When bidding starts
-        uint256 endTime; // When bidding ends
-        uint256 extensionWindow; // Auto-extend window (anti-sniping)
-        // Current State
+        string description;
+        address owner;
         address highestBidder;
+        address nftAddress;
+        address paymentToken;
         uint256 highestBid;
-        bool settled; // Auction finalized
-        // Funds Handling
-        address paymentToken; // ERC20 token address (or address(0) for native ETH)
+        uint256 reservePrice;
+        uint256 buyoutPrice;
+        uint256 startTime;
+        uint256 endTime;
+        uint256 extensionWindow;
+        uint64 minBidIncrement;
+        uint64 auctionId;
+        uint64 tokenId;
+        bool settled;
+    }
+    struct AuctionView {
+        string description;
+        uint256 reservePrice;
+        uint256 minBidIncrement;
+        uint256 buyoutPrice;
+        uint256 startTime;
+        uint256 endTime;
+        uint256 highestBid;
+        uint256 extensionWindow;
+        address paymentToken;
+        address highestBidder;
+        address nftAddress;
+        address owner;
+        uint64 auctionId;
+        uint64 tokenId;
+        bool settled;
     }
 
-    uint256 private auctionCounter;
-    mapping(uint256 => Auction) private auctions; // auctionId => Auction
-    mapping(uint256 => mapping(address => uint256)) private bids; // auctionId => bidder => amount
+    struct PlatformView {
+        uint32 PLATFORM_FEE;
+        address platformFeeRecipient;
+        bool isPaused;
+    }
 
-    constructor(address _initialOwner) Ownable(_initialOwner) {}
+    mapping(uint256 auctionId => Auction) private auctions; // auctionId => Auction
+    mapping(uint256 auctionId => mapping(address bidder => uint256 bid))
+        private bids; // auctionId => bidder => amount
+
+    uint256 private constant MIN_AUCTION_DURATION = 1 hours; // enforce minimum
+    address private platformFeeRecipient;
+    uint64 private auctionCounter;
+    uint32 private constant PLATFORM_FEE = 3; //3%
+
+    event AuctionCreated(
+        uint64 indexed auctionId,
+        address indexed owner,
+        address nftAddress,
+        uint64 tokenId,
+        string description
+    );
+    event BidPlaced(
+        uint64 indexed auctionId,
+        address indexed bidder,
+        uint256 amount
+    );
+    event BidRefunded(
+        uint64 indexed auctionId,
+        address indexed bidder,
+        uint256 amount
+    );
+    event AuctionSettled(
+        uint64 indexed auctionId,
+        address indexed winner,
+        uint256 winningBid,
+        address paymentToken
+    );
+    event AuctionCancelled(uint64 indexed auctionId, address indexed owner);
+
+    constructor(address _initialOwner) Ownable(_initialOwner) {
+        if (_initialOwner == address(0)) revert ZeroAddress();
+        platformFeeRecipient = _initialOwner;
+    }
 
     function createAuction(
         address _nftAddress,
-        uint256 _tokenId,
+        uint64 _tokenId,
         uint256 _reservePrice,
-        uint256 _minBidIncrement,
+        uint64 _minBidIncrement,
         uint256 _buyoutPrice,
         uint256 _startTimeInMinutes,
         uint256 _endTimeInMinutes,
         uint256 _extensionWindow,
-        address _paymentToken
+        address _paymentToken,
+        string memory _description
     ) external nonReentrant returns (uint256) {
+        if (paused()) revert ContractPaused();
+        if (_reservePrice == 0) revert ReserveMustBeGreaterThanZero();
+
         uint256 startTime = block.timestamp + _minutes(_startTimeInMinutes);
         uint256 endTime = block.timestamp + _minutes(_endTimeInMinutes);
 
-        if (endTime < startTime) revert InvalidTimeRange();
-        if (_reservePrice < 0) revert ReserveMustBeGreaterThanZero();
+        if (endTime <= startTime) revert InvalidTimeRange();
+        if (endTime - startTime < MIN_AUCTION_DURATION)
+            revert AuctionTooShort();
 
         address owner = msg.sender;
 
-        auctionCounter++;
-        uint256 auctionId = auctionCounter;
+        // Ownership check
+        if (IERC721(_nftAddress).ownerOf(_tokenId) != owner) {
+            revert NotNftOwner();
+        }
+
+        // Approval check
+        if (!IERC721(_nftAddress).isApprovedForAll(owner, address(this))) {
+            // Fallback: also check direct token approval
+            if (IERC721(_nftAddress).getApproved(_tokenId) != address(this)) {
+                revert NotApprovedForTransfer();
+            }
+        }
 
         // Transfer NFT into escrow
-        IERC721(_nftAddress).transferFrom(owner, address(this), _tokenId);
+        IERC721(_nftAddress).safeTransferFrom(owner, address(this), _tokenId);
+
+        auctionCounter++;
+        uint64 auctionId = auctionCounter;
 
         auctions[auctionId] = Auction({
             auctionId: auctionId,
@@ -82,57 +171,78 @@ contract RaiseXNftAuctionPlatform is Ownable, ReentrancyGuard {
             highestBidder: address(0),
             highestBid: 0,
             settled: false,
-            paymentToken: _paymentToken
+            paymentToken: _paymentToken,
+            description: _description
         });
+        emit AuctionCreated(
+            auctionId,
+            owner,
+            _nftAddress,
+            _tokenId,
+            _description
+        );
 
         return auctionId;
     }
 
     function placeBid(
-        uint256 _auctionId,
+        uint64 _auctionId,
         uint256 _amount
     ) external payable nonReentrant {
+        if (paused()) revert ContractPaused();
+
         Auction storage auction = auctions[_auctionId];
-        require(block.timestamp >= auction.startTime, "Auction not started");
-        require(block.timestamp < auction.endTime, "Auction ended");
-        require(!auction.settled, "Auction settled");
+
+        if (block.timestamp < auction.startTime) revert AuctionNotStarted();
+        if (block.timestamp > auction.endTime) revert AuctionEnded();
+        if (auction.settled) revert AuctionAlreadySettled();
 
         uint256 minRequiredBid = auction.highestBid == 0
             ? auction.reservePrice
             : auction.highestBid + auction.minBidIncrement;
-        require(_amount >= minRequiredBid, "Bid too low");
 
-        // Handle ERC20 or ETH
+        if (_amount < minRequiredBid) revert BidTooLow();
+
+        address bidder = msg.sender;
+
+        // Handle ETH or ERC20 payments
         if (auction.paymentToken == address(0)) {
-            require(msg.value == _amount, "ETH mismatch");
+            if (msg.value != _amount) revert EthMisMatch();
         } else {
             IERC20(auction.paymentToken).safeTransferFrom(
-                msg.sender,
+                bidder,
                 address(this),
                 _amount
             );
         }
 
-        // Refund previous highest bidder
-        if (auction.highestBidder != address(0)) {
-            if (auction.paymentToken == address(0)) {
-                payable(auction.highestBidder).transfer(auction.highestBid);
-            } else {
-                IERC20(auction.paymentToken).safeTransfer(
-                    auction.highestBidder,
-                    auction.highestBid
-                );
-            }
-        }
+        // --- Checks-Effects-Interactions pattern ---
 
-        // Record new highest bid
-        auction.highestBidder = msg.sender;
+        // Store previous highest bidder + amount
+        address prevBidder = auction.highestBidder;
+        uint256 prevBid = auction.highestBid;
+
+        // Update state BEFORE making external calls
+        auction.highestBidder = bidder;
         auction.highestBid = _amount;
 
-        // Anti-sniping: extend if bid placed near end
+        // Refund previous highest bidder
+        if (prevBidder != address(0)) {
+            if (auction.paymentToken == address(0)) {
+                (bool success, ) = payable(prevBidder).call{value: prevBid}("");
+                if (!success) revert PaymentFail();
+            } else {
+                IERC20(auction.paymentToken).safeTransfer(prevBidder, prevBid);
+            }
+            emit BidRefunded(_auctionId, prevBidder, prevBid);
+        }
+
+        // Anti-sniping: extend if near end
         if (auction.endTime - block.timestamp <= auction.extensionWindow) {
             auction.endTime = block.timestamp + auction.extensionWindow;
         }
+
+        emit BidPlaced(_auctionId, bidder, _amount);
 
         // Instant buyout
         if (auction.buyoutPrice > 0 && _amount >= auction.buyoutPrice) {
@@ -140,64 +250,209 @@ contract RaiseXNftAuctionPlatform is Ownable, ReentrancyGuard {
         }
     }
 
-    function settleAuction(uint256 _auctionId) external nonReentrant {
+    function settleAuction(uint64 _auctionId) external nonReentrant {
+        if (paused()) revert ContractPaused();
+
         Auction storage auction = auctions[_auctionId];
-        require(
-            block.timestamp >= auction.endTime || msg.sender == auction.owner,
-            "Auction still active"
-        );
-        require(!auction.settled, "Already settled");
+
+        // Anyone can settle after the auction ends
+        if (block.timestamp < auction.endTime) revert AuctionStillActive();
+        if (auction.settled) revert AuctionAlreadySettled();
 
         _settleAuction(_auctionId);
-    }
-
-    function _settleAuction(uint256 _auctionId) internal {
-        Auction storage auction = auctions[_auctionId];
-        auction.settled = true;
-
-        if (auction.highestBidder != address(0)) {
-            // Transfer NFT to winner
-            IERC721(auction.nftAddress).transferFrom(
-                address(this),
-                auction.highestBidder,
-                auction.tokenId
-            );
-
-            // Transfer funds to seller
-            if (auction.paymentToken == address(0)) {
-                payable(auction.owner).transfer(auction.highestBid);
-            } else {
-                IERC20(auction.paymentToken).safeTransfer(
-                    auction.owner,
-                    auction.highestBid
-                );
-            }
-        } else {
-            // No bids: return NFT to seller
-            IERC721(auction.nftAddress).transferFrom(
-                address(this),
-                auction.owner,
-                auction.tokenId
-            );
-        }
-    }
-
-    function cancelAuction(uint256 _auctionId) external nonReentrant {
-        Auction storage auction = auctions[_auctionId];
-        if (msg.sender != auction.owner) revert UnAuthorized();
-        require(!auction.settled, "Already settled");
-        require(auction.highestBidder == address(0), "Bids already placed");
-
-        auction.settled = true;
-        IERC721(auction.nftAddress).transferFrom(
-            address(this),
-            auction.owner,
-            auction.tokenId
-        );
     }
 
     // minutes -> seconds helper (optional)
     function _minutes(uint256 m) internal pure returns (uint256) {
         return m * 1 minutes; // same as m * 60
+    }
+
+    function _settleAuction(uint64 _auctionId) internal {
+        Auction storage auction = auctions[_auctionId];
+
+        // CEI: mark settled first
+        auction.settled = true;
+
+        // No bids → return NFT to seller
+        if (auction.highestBidder == address(0)) {
+            IERC721(auction.nftAddress).safeTransferFrom(
+                address(this),
+                auction.owner,
+                auction.tokenId
+            );
+            emit AuctionSettled(
+                _auctionId,
+                address(0),
+                0,
+                auction.paymentToken
+            );
+            return;
+        }
+
+        // 1) Transfer NFT to winner
+        IERC721(auction.nftAddress).safeTransferFrom(
+            address(this),
+            auction.highestBidder,
+            auction.tokenId
+        );
+
+        // 2) Payouts (platform fee + seller proceeds)
+        uint256 amount = auction.highestBid;
+        uint256 fee = (amount * PLATFORM_FEE) / 100;
+        uint256 sellerProceeds = amount - fee;
+
+        if (auction.paymentToken == address(0)) {
+            // ETH
+            if (fee > 0) {
+                (bool ok1, ) = payable(platformFeeRecipient).call{value: fee}(
+                    ""
+                );
+                if (!ok1) revert PaymentFail();
+            }
+            (bool ok2, ) = payable(auction.owner).call{value: sellerProceeds}(
+                ""
+            );
+            if (!ok2) revert PaymentFail();
+        } else {
+            // ERC20
+            IERC20 token = IERC20(auction.paymentToken);
+            if (fee > 0) token.safeTransfer(platformFeeRecipient, fee);
+            token.safeTransfer(auction.owner, sellerProceeds);
+        }
+
+        emit AuctionSettled(
+            _auctionId,
+            auction.highestBidder,
+            amount,
+            auction.paymentToken
+        );
+    }
+
+    function cancelAuction(uint64 _auctionId) external nonReentrant {
+        if (paused()) revert ContractPaused();
+
+        Auction storage auction = auctions[_auctionId];
+
+        if (msg.sender != auction.owner) revert UnAuthorized();
+        if (auction.settled) revert AuctionAlreadySettled();
+        if (auction.highestBidder != address(0)) revert BidsAlreadyPlaced();
+
+        // CEI: mark settled before transferring NFT out
+        auction.settled = true;
+
+        IERC721(auction.nftAddress).safeTransferFrom(
+            address(this),
+            auction.owner,
+            auction.tokenId
+        );
+
+        emit AuctionCancelled(_auctionId, auction.owner);
+    }
+
+    /// @dev Returns the unique keccak256 hash of an event's signature string.
+    /// Used to identify events in the EVM log system.
+    /// Example: "DepositReceived(address,uint256)" → bytes32 hash
+    function _hashEvent(
+        string memory eventSignature
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(eventSignature));
+    }
+
+    function visibilityRules() external pure returns (VisibilityConfig memory) {
+        EventLogConfig[] memory eventLogConfigs = new EventLogConfig[](5);
+
+        bytes32 auctionCreatedSig = _hashEvent(
+            "AuctionCreated(uint64,address,address,uint64,string)"
+        );
+        Field[] memory relevantToAuctionCreated = new Field[](1);
+        relevantToAuctionCreated[0] = Field.TOPIC2;
+        eventLogConfigs[0] = EventLogConfig(
+            auctionCreatedSig,
+            relevantToAuctionCreated
+        );
+
+        bytes32 bidPlacedSig = _hashEvent("BidPlaced(uint64,address,uint256)");
+        Field[] memory relevantToBidPlaced = new Field[](1);
+        relevantToBidPlaced[0] = Field.TOPIC2;
+        eventLogConfigs[1] = EventLogConfig(bidPlacedSig, relevantToBidPlaced);
+
+        bytes32 bidRefundedSig = _hashEvent(
+            "BidRefunded(uint64 indexed auctionId,address indexed bidder,uint256 amount)"
+        );
+        Field[] memory relevantToBidRefunded = new Field[](1);
+        relevantToBidRefunded[0] = Field.TOPIC2;
+        eventLogConfigs[2] = EventLogConfig(
+            bidRefundedSig,
+            relevantToBidRefunded
+        );
+
+        bytes32 auctionSettledSig = _hashEvent(
+            "AuctionSettled(uint64,address,uint256,address)"
+        );
+        Field[] memory relevantToAuctionSettled = new Field[](1);
+        relevantToAuctionSettled[0] = Field.TOPIC2;
+        eventLogConfigs[3] = EventLogConfig(
+            auctionSettledSig,
+            relevantToAuctionSettled
+        );
+
+        bytes32 auctionCancelledSig = _hashEvent(
+            "AuctionCancelled(uint64 indexed auctionId, address indexed owner)"
+        );
+        Field[] memory relevantToAuctionCancelled = new Field[](1);
+        relevantToAuctionCancelled[0] = Field.TOPIC2;
+        eventLogConfigs[1] = EventLogConfig(
+            auctionCancelledSig,
+            relevantToAuctionCancelled
+        );
+
+        // Return global visibility rules
+        return VisibilityConfig(ContractCfg.PRIVATE, eventLogConfigs);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function setPlatformFeeAddress(address feeAddress) external onlyOwner {
+        if (feeAddress == address(0)) revert ZeroAddress();
+        platformFeeRecipient = feeAddress;
+    }
+
+    function getAuction(
+        uint64 _auctionId
+    ) external view returns (AuctionView memory) {
+        Auction storage a = auctions[_auctionId];
+        return
+            AuctionView({
+                auctionId: a.auctionId,
+                owner: a.owner,
+                nftAddress: a.nftAddress,
+                tokenId: a.tokenId,
+                reservePrice: a.reservePrice,
+                minBidIncrement: a.minBidIncrement,
+                buyoutPrice: a.buyoutPrice,
+                startTime: a.startTime,
+                endTime: a.endTime,
+                extensionWindow: a.extensionWindow,
+                highestBidder: a.highestBidder,
+                highestBid: a.highestBid,
+                settled: a.settled,
+                paymentToken: a.paymentToken,
+                description: a.description
+            });
+    }
+
+    function getPlatformInfo() external view returns (PlatformView memory) {
+        return
+            PlatformView({
+                PLATFORM_FEE: PLATFORM_FEE,
+                platformFeeRecipient: platformFeeRecipient,
+                isPaused: paused()
+            });
     }
 }

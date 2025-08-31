@@ -13,7 +13,7 @@ error GuessingGame__ZeroAddress();
 error GuessingGame__WithdrawalFailed();
 error GuessingGame__GamePaused();
 error GuessingGame__RefundFailed();
-error GuessingGame__InvalidGuess();
+error GuessingGame__InvalidGuessRange();
 error GuessingGame__Underpay();
 error GuessingGame__OnlyOwnerOrTimeout();
 
@@ -54,7 +54,7 @@ contract RaiseXGuessingGame is
     uint256 public constant MAX_ROUND_DURATION = 1 days;
     bytes32 private currentCommit;
 
-    uint64 private constant globalMaxGuess = 1_000_000;
+    uint64 private constant globalMaxGuess = 100_000;
     uint64 private secretNumber;
     uint64 private currentGlobalGuessCount;
     uint64 private currentRound;
@@ -81,7 +81,13 @@ contract RaiseXGuessingGame is
         // initialize secret for round 1 and set commit
         uint256 scrt = _generateRandomNumber(); // sets secretNumber
         salt = uint256(
-            keccak256(abi.encodePacked(block.prevrandao, block.timestamp))
+            keccak256(
+                abi.encodePacked(
+                    block.prevrandao,
+                    block.timestamp,
+                    address(this)
+                )
+            )
         );
         currentCommit = keccak256(abi.encode(scrt, salt));
         currentRound = 1;
@@ -108,7 +114,6 @@ contract RaiseXGuessingGame is
         // refund change if any
         uint256 change = amount - depositAmount;
         if (change > 0) {
-            // nonReentrant protects us here
             (bool r, ) = payable(player).call{value: change}("");
             if (!r) revert GuessingGame__RefundFailed();
         }
@@ -136,8 +141,8 @@ contract RaiseXGuessingGame is
         if (!info.hasDeposited) revert GuessingGame__DepositRequired();
         if (info.guesses >= playerMaxGuess)
             revert GuessingGame__MaxGuessesReached();
-        if (playerGuess == 0 || playerGuess > globalMaxGuess)
-            revert GuessingGame__InvalidGuess();
+        if (playerGuess <= 0 || playerGuess > globalMaxGuess)
+            revert GuessingGame__InvalidGuessRange();
 
         info.guesses++;
         currentGlobalGuessCount++;
@@ -174,7 +179,7 @@ contract RaiseXGuessingGame is
         uint256 carryOver = (pool * NEXT_ROUND_POOL) / 100;
         uint256 prize = pool - pFee - carryOver;
 
-        platformBalance += pFee; // accumulate
+        platformBalance += pFee; // accumulate platform fee
         totalPayouts += prize;
 
         (bool sPrize, ) = payable(player).call{value: prize}("");
@@ -190,7 +195,13 @@ contract RaiseXGuessingGame is
         uint256 scrtNum = _generateRandomNumber();
 
         salt = uint256(
-            keccak256(abi.encodePacked(block.prevrandao, block.timestamp))
+            keccak256(
+                abi.encodePacked(
+                    block.prevrandao,
+                    block.timestamp,
+                    address(this)
+                )
+            )
         );
         currentCommit = keccak256(abi.encode(scrtNum, salt));
 
@@ -239,12 +250,7 @@ contract RaiseXGuessingGame is
     /// - Sets visibility rules
     /// - Each event is linked to specific viewers
     /// - Returns PRIVATE contract mode with these event-based rules.
-    function visibilityRules()
-        external
-        pure
-        override
-        returns (VisibilityConfig memory)
-    {
+    function visibilityRules() external pure returns (VisibilityConfig memory) {
         // We are configuring visibility rules for X events in this contract.
         // -> The array size is set at creation time in memory.
         EventLogConfig[] memory eventLogConfigs = new EventLogConfig[](6);
@@ -349,11 +355,11 @@ contract RaiseXGuessingGame is
         if (!(isOwner || isTimeout)) {
             revert GuessingGame__OnlyOwnerOrTimeout();
         }
-        _revealRound(); // reveal current round so it can be audited
+        _revealRound(); // reveal current round
         _nextRound();
     }
 
-    /// External view functions
+    /// External view function
     function getFullState(
         address player
     ) external view returns (FullState memory) {
