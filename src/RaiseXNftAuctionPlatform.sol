@@ -25,6 +25,8 @@ error AuctionTooShort();
 error NotNftOwner();
 error NotApprovedForTransfer();
 error ZeroAddress();
+error ErrorInvalidMsgValue();
+error ErrorInvalidAmount();
 
 contract RaiseXNftAuctionPlatform is
     Ownable,
@@ -120,8 +122,8 @@ contract RaiseXNftAuctionPlatform is
         uint256 _reservePrice,
         uint64 _minBidIncrement,
         uint256 _buyoutPrice,
-        uint256 _startTimeInMinutes,
-        uint256 _endTimeInMinutes,
+        uint256 _startTimeInHours,
+        uint256 _endTimeInHours,
         uint256 _extensionWindow,
         address _paymentToken,
         string memory _description
@@ -129,8 +131,8 @@ contract RaiseXNftAuctionPlatform is
         if (paused()) revert ContractPaused();
         if (_reservePrice == 0) revert ReserveMustBeGreaterThanZero();
 
-        uint256 startTime = block.timestamp + _minutes(_startTimeInMinutes);
-        uint256 endTime = block.timestamp + _minutes(_endTimeInMinutes);
+        uint256 startTime = block.timestamp + _hours(_startTimeInHours);
+        uint256 endTime = block.timestamp + _hours(_endTimeInHours);
 
         if (endTime <= startTime) revert InvalidTimeRange();
         if (endTime - startTime < MIN_AUCTION_DURATION)
@@ -201,32 +203,39 @@ contract RaiseXNftAuctionPlatform is
             ? auction.reservePrice
             : auction.highestBid + auction.minBidIncrement;
 
-        if (_amount < minRequiredBid) revert BidTooLow();
-
+        uint256 amountIn;
         address bidder = msg.sender;
 
-        // Handle ETH or ERC20 payments
+        // --- Handle native ETH vs ERC20 ---
         if (auction.paymentToken == address(0)) {
-            if (msg.value != _amount) revert EthMisMatch();
+            // Native: msg.value is the bid
+            if (msg.value == 0) revert ErrorInvalidAmount();
+            amountIn = msg.value;
         } else {
+            // ERC20: caller must not send ETH
+            if (msg.value != 0) revert ErrorInvalidMsgValue();
+            amountIn = _amount;
+            if (amountIn == 0) revert ErrorInvalidAmount();
+
+            // Pull only the exact bid amount
             IERC20(auction.paymentToken).safeTransferFrom(
                 bidder,
                 address(this),
-                _amount
+                amountIn
             );
         }
 
-        // --- Checks-Effects-Interactions pattern ---
+        if (amountIn < minRequiredBid) revert BidTooLow();
 
-        // Store previous highest bidder + amount
+        // --- Checks-Effects-Interactions ---
         address prevBidder = auction.highestBidder;
         uint256 prevBid = auction.highestBid;
 
-        // Update state BEFORE making external calls
+        // Update state BEFORE external calls
         auction.highestBidder = bidder;
-        auction.highestBid = _amount;
+        auction.highestBid = amountIn;
 
-        // Refund previous highest bidder
+        // Refund previous bidder (if any)
         if (prevBidder != address(0)) {
             if (auction.paymentToken == address(0)) {
                 (bool success, ) = payable(prevBidder).call{value: prevBid}("");
@@ -237,15 +246,15 @@ contract RaiseXNftAuctionPlatform is
             emit BidRefunded(_auctionId, prevBidder, prevBid);
         }
 
-        // Anti-sniping: extend if near end
+        // Anti-sniping extension
         if (auction.endTime - block.timestamp <= auction.extensionWindow) {
             auction.endTime = block.timestamp + auction.extensionWindow;
         }
 
-        emit BidPlaced(_auctionId, bidder, _amount);
+        emit BidPlaced(_auctionId, bidder, amountIn);
 
         // Instant buyout
-        if (auction.buyoutPrice > 0 && _amount >= auction.buyoutPrice) {
+        if (auction.buyoutPrice > 0 && amountIn >= auction.buyoutPrice) {
             _settleAuction(_auctionId);
         }
     }
@@ -262,9 +271,8 @@ contract RaiseXNftAuctionPlatform is
         _settleAuction(_auctionId);
     }
 
-    // minutes -> seconds helper (optional)
-    function _minutes(uint256 m) internal pure returns (uint256) {
-        return m * 1 minutes; // same as m * 60
+    function _hours(uint256 m) internal pure returns (uint256) {
+        return m * 1 hours;
     }
 
     function _settleAuction(uint64 _auctionId) internal {
