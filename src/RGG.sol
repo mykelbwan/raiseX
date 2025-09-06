@@ -387,6 +387,7 @@ contract RaiseXGuessingGame is
     }
 
     //// accept any deposit as an entry to the game
+    // extra will be auto refunded
     receive() external payable {
         deposit();
     }

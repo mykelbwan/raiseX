@@ -11,7 +11,6 @@ contract DeployRaiseXTokenSalePlatformScript is Script {
         vm.startBroadcast();
         RaiseXTokenSalePlatform newRaiseX = new RaiseXTokenSalePlatform(
             initialOwner,
-            feeAddress,
             feeAddress
         );
         vm.stopBroadcast();

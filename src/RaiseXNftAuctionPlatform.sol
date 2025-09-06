@@ -37,7 +37,6 @@ contract RaiseXNftAuctionPlatform is
     using SafeERC20 for IERC20;
 
     struct Auction {
-        string description;
         address owner;
         address highestBidder;
         address nftAddress;
@@ -48,13 +47,12 @@ contract RaiseXNftAuctionPlatform is
         uint256 startTime;
         uint256 endTime;
         uint256 extensionWindow;
-        uint64 minBidIncrement;
-        uint64 auctionId;
-        uint64 tokenId;
+        uint256 minBidIncrement;
+        uint256 auctionId;
+        uint256 tokenId;
         bool settled;
     }
     struct AuctionView {
-        string description;
         uint256 reservePrice;
         uint256 minBidIncrement;
         uint256 buyoutPrice;
@@ -66,13 +64,13 @@ contract RaiseXNftAuctionPlatform is
         address highestBidder;
         address nftAddress;
         address owner;
-        uint64 auctionId;
-        uint64 tokenId;
+        uint256 auctionId;
+        uint256 tokenId;
         bool settled;
     }
 
     struct PlatformView {
-        uint32 PLATFORM_FEE;
+        uint32 platformFee;
         address platformFeeRecipient;
         bool isPaused;
     }
@@ -83,33 +81,36 @@ contract RaiseXNftAuctionPlatform is
 
     uint256 private constant MIN_AUCTION_DURATION = 1 hours; // enforce minimum
     address private platformFeeRecipient;
-    uint64 private auctionCounter;
+    uint256 private auctionCounter;
     uint32 private constant PLATFORM_FEE = 3; //3%
 
     event AuctionCreated(
-        uint64 indexed auctionId,
-        address indexed owner,
-        address nftAddress,
-        uint64 tokenId,
-        string description
+        address indexed _nftAddress,
+        uint256 _tokenId,
+        uint256 _reservePrice,
+        uint256 _minBidIncrement,
+        uint256 _buyoutPrice,
+        uint256 _startTimeInHours,
+        uint256 _endTimeInHours,
+        uint256 _extensionWindow,
+        address _paymentToken
     );
     event BidPlaced(
-        uint64 indexed auctionId,
+        uint256 indexed auctionId,
         address indexed bidder,
         uint256 amount
     );
     event BidRefunded(
-        uint64 indexed auctionId,
+        uint256 indexed auctionId,
         address indexed bidder,
         uint256 amount
     );
     event AuctionSettled(
-        uint64 indexed auctionId,
-        address indexed winner,
+        uint256 indexed auctionId,
         uint256 winningBid,
         address paymentToken
     );
-    event AuctionCancelled(uint64 indexed auctionId, address indexed owner);
+    event AuctionCancelled(uint256 indexed auctionId);
 
     constructor(address _initialOwner) Ownable(_initialOwner) {
         if (_initialOwner == address(0)) revert ZeroAddress();
@@ -118,16 +119,15 @@ contract RaiseXNftAuctionPlatform is
 
     function createAuction(
         address _nftAddress,
-        uint64 _tokenId,
+        uint256 _tokenId,
         uint256 _reservePrice,
-        uint64 _minBidIncrement,
+        uint256 _minBidIncrement,
         uint256 _buyoutPrice,
         uint256 _startTimeInHours,
         uint256 _endTimeInHours,
         uint256 _extensionWindow,
-        address _paymentToken,
-        string memory _description
-    ) external nonReentrant returns (uint256) {
+        address _paymentToken
+    ) external nonReentrant {
         if (paused()) revert ContractPaused();
         if (_reservePrice == 0) revert ReserveMustBeGreaterThanZero();
 
@@ -146,18 +146,14 @@ contract RaiseXNftAuctionPlatform is
         }
 
         // Approval check
-        if (!IERC721(_nftAddress).isApprovedForAll(owner, address(this))) {
-            // Fallback: also check direct token approval
-            if (IERC721(_nftAddress).getApproved(_tokenId) != address(this)) {
-                revert NotApprovedForTransfer();
-            }
-        }
+        if (!IERC721(_nftAddress).isApprovedForAll(owner, address(this)))
+            revert NotApprovedForTransfer();
 
         // Transfer NFT into escrow
         IERC721(_nftAddress).safeTransferFrom(owner, address(this), _tokenId);
 
         auctionCounter++;
-        uint64 auctionId = auctionCounter;
+        uint256 auctionId = auctionCounter;
 
         auctions[auctionId] = Auction({
             auctionId: auctionId,
@@ -173,22 +169,23 @@ contract RaiseXNftAuctionPlatform is
             highestBidder: address(0),
             highestBid: 0,
             settled: false,
-            paymentToken: _paymentToken,
-            description: _description
+            paymentToken: _paymentToken
         });
         emit AuctionCreated(
-            auctionId,
-            owner,
             _nftAddress,
             _tokenId,
-            _description
+            _reservePrice,
+            _minBidIncrement,
+            _buyoutPrice,
+            startTime,
+            endTime,
+            _extensionWindow,
+            _paymentToken
         );
-
-        return auctionId;
     }
 
     function placeBid(
-        uint64 _auctionId,
+        uint256 _auctionId,
         uint256 _amount
     ) external payable nonReentrant {
         if (paused()) revert ContractPaused();
@@ -259,7 +256,7 @@ contract RaiseXNftAuctionPlatform is
         }
     }
 
-    function settleAuction(uint64 _auctionId) external nonReentrant {
+    function settleAuction(uint256 _auctionId) external nonReentrant {
         if (paused()) revert ContractPaused();
 
         Auction storage auction = auctions[_auctionId];
@@ -275,7 +272,7 @@ contract RaiseXNftAuctionPlatform is
         return m * 1 hours;
     }
 
-    function _settleAuction(uint64 _auctionId) internal {
+    function _settleAuction(uint256 _auctionId) internal {
         Auction storage auction = auctions[_auctionId];
 
         // CEI: mark settled first
@@ -290,8 +287,7 @@ contract RaiseXNftAuctionPlatform is
             );
             emit AuctionSettled(
                 _auctionId,
-                address(0),
-                0,
+                auction.highestBid,
                 auction.paymentToken
             );
             return;
@@ -330,13 +326,12 @@ contract RaiseXNftAuctionPlatform is
 
         emit AuctionSettled(
             _auctionId,
-            auction.highestBidder,
-            amount,
+            auction.highestBid,
             auction.paymentToken
         );
     }
 
-    function cancelAuction(uint64 _auctionId) external nonReentrant {
+    function cancelAuction(uint256 _auctionId) external nonReentrant {
         if (paused()) revert ContractPaused();
 
         Auction storage auction = auctions[_auctionId];
@@ -354,7 +349,7 @@ contract RaiseXNftAuctionPlatform is
             auction.tokenId
         );
 
-        emit AuctionCancelled(_auctionId, auction.owner);
+        emit AuctionCancelled(_auctionId);
     }
 
     /// @dev Returns the unique keccak256 hash of an event's signature string.
@@ -370,22 +365,22 @@ contract RaiseXNftAuctionPlatform is
         EventLogConfig[] memory eventLogConfigs = new EventLogConfig[](5);
 
         bytes32 auctionCreatedSig = _hashEvent(
-            "AuctionCreated(uint64,address,address,uint64,string)"
+            "AuctionCreated(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,address)"
         );
         Field[] memory relevantToAuctionCreated = new Field[](1);
-        relevantToAuctionCreated[0] = Field.TOPIC2;
+        relevantToAuctionCreated[0] = Field.EVERYONE;
         eventLogConfigs[0] = EventLogConfig(
             auctionCreatedSig,
             relevantToAuctionCreated
         );
 
-        bytes32 bidPlacedSig = _hashEvent("BidPlaced(uint64,address,uint256)");
+        bytes32 bidPlacedSig = _hashEvent("BidPlaced(uint256,address,uint256)");
         Field[] memory relevantToBidPlaced = new Field[](1);
         relevantToBidPlaced[0] = Field.TOPIC2;
         eventLogConfigs[1] = EventLogConfig(bidPlacedSig, relevantToBidPlaced);
 
         bytes32 bidRefundedSig = _hashEvent(
-            "BidRefunded(uint64 indexed auctionId,address indexed bidder,uint256 amount)"
+            "BidRefunded(uint256,address,uint256)"
         );
         Field[] memory relevantToBidRefunded = new Field[](1);
         relevantToBidRefunded[0] = Field.TOPIC2;
@@ -395,20 +390,18 @@ contract RaiseXNftAuctionPlatform is
         );
 
         bytes32 auctionSettledSig = _hashEvent(
-            "AuctionSettled(uint64,address,uint256,address)"
+            "AuctionSettled(uint256,uint256,address)"
         );
         Field[] memory relevantToAuctionSettled = new Field[](1);
-        relevantToAuctionSettled[0] = Field.TOPIC2;
+        relevantToAuctionSettled[0] = Field.EVERYONE;
         eventLogConfigs[3] = EventLogConfig(
             auctionSettledSig,
             relevantToAuctionSettled
         );
 
-        bytes32 auctionCancelledSig = _hashEvent(
-            "AuctionCancelled(uint64 indexed auctionId, address indexed owner)"
-        );
+        bytes32 auctionCancelledSig = _hashEvent("AuctionCancelled(uint256)");
         Field[] memory relevantToAuctionCancelled = new Field[](1);
-        relevantToAuctionCancelled[0] = Field.TOPIC2;
+        relevantToAuctionCancelled[0] = Field.EVERYONE;
         eventLogConfigs[1] = EventLogConfig(
             auctionCancelledSig,
             relevantToAuctionCancelled
@@ -432,7 +425,7 @@ contract RaiseXNftAuctionPlatform is
     }
 
     function getAuction(
-        uint64 _auctionId
+        uint256 _auctionId
     ) external view returns (AuctionView memory) {
         Auction storage a = auctions[_auctionId];
         return
@@ -450,15 +443,14 @@ contract RaiseXNftAuctionPlatform is
                 highestBidder: a.highestBidder,
                 highestBid: a.highestBid,
                 settled: a.settled,
-                paymentToken: a.paymentToken,
-                description: a.description
+                paymentToken: a.paymentToken
             });
     }
 
     function getPlatformInfo() external view returns (PlatformView memory) {
         return
             PlatformView({
-                PLATFORM_FEE: PLATFORM_FEE,
+                platformFee: PLATFORM_FEE,
                 platformFeeRecipient: platformFeeRecipient,
                 isPaused: paused()
             });

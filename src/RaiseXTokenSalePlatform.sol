@@ -7,41 +7,41 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
 
-error RaiseX__ErrorMissingParam();
-error RaiseX__ErrorInvalidPresaleId();
-error RaiseX__ErrorPresaleFilled();
-error RaiseX__ErrorInvalidAmount();
-error RaiseX__ErrorInvalidMsgValue();
-error RaiseX__ErrorRefundExcessFilled();
-error RaiseX__ErrorPresaleNotActive();
-error RaiseX__ErrorExceedsWalletMax();
-error RaiseX__ErrorInvalidCap();
-error RaiseX__ErrorInvalidStart();
-error RaiseX__ErrorInvalidTimeRange();
-error RaiseX__ErrorInvalidPresaleType();
-error RaiseX__ErrorUnAuthorized();
+error ErrorMissingParam();
+error ErrorInvalidPresaleId();
+error ErrorPresaleFilled();
+error ErrorInvalidAmount();
+error ErrorInvalidMsgValue();
+error ErrorRefundExcessFilled();
+error ErrorPresaleNotActive();
+error ErrorExceedsWalletMax();
+error ErrorInvalidCap();
+error ErrorInvalidStart();
+error ErrorInvalidTimeRange();
+error ErrorInvalidPresaleType();
+error ErrorUnAuthorized();
 error ErrorNoLeftover();
-error RaiseX__ErrorFeeTooHigh(uint8);
-error RaiseX__ErrorAddressCannotBeZeroAddress();
-error RaiseX__ErrorPresaleNotFinalized();
-error RaiseX__ErrorFundsAlreadyWithdrawn();
-error RaiseX__ErrorPresaleStillActive();
-error RaiseX__ErrorPresaleFailed();
-error RaiseX__ErrorWithdrawFailed();
-error RaiseX__ErrorAlreadyFinalized();
-error RaiseX__ErrorPresaleNotFailed();
-error RaiseX__ErrorRefundFailed();
-error RaiseX__ErrorSoftCapReached();
-error RaiseX__ErrorCannotSellPresaleTokenInSameToken();
-error RaiseX__ErrorNotCancelledPresale();
-error RaiseX__ErrorNotWhitelistSale();
-error RaiseX__ErrorWhitelistNotActive();
-error RaiseX__ErrorNotWhitelisted();
-error RaiseX__ErrorPresaleNotStarted();
-error RaiseX__ErrorInvalidWlSale();
-error RaiseX__ErrorBatchExceedsMaxAllowed(uint256);
-error RaiseX__ErrorInvalidNumber(uint16);
-error RaiseX__ErrorFunctionalityIsPaused();
+error ErrorFeeTooHigh(uint8);
+error ErrorAddressCannotBeZeroAddress();
+error ErrorPresaleNotFinalized();
+error ErrorFundsAlreadyWithdrawn();
+error ErrorPresaleStillActive();
+error ErrorPresaleFailed();
+error ErrorWithdrawFailed();
+error ErrorAlreadyFinalized();
+error ErrorPresaleNotFailed();
+error ErrorRefundFailed();
+error ErrorSoftCapReached();
+error ErrorCannotSellPresaleTokenInSameToken();
+error ErrorNotCancelledPresale();
+error ErrorNotWhitelistSale();
+error ErrorWhitelistNotActive();
+error ErrorNotWhitelisted();
+error ErrorPresaleNotStarted();
+error ErrorInvalidWlSale();
+error ErrorBatchExceedsMaxAllowed(uint256);
+error ErrorInvalidNumber(uint16);
+error ErrorFunctionalityIsPaused();
 
 contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     using SafeERC20 for IERC20;
@@ -93,7 +93,6 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     uint256 public totalProjectsRaised; // track total number of projects that have raised on the platform
     uint256 private presaleCounter; // incremented at each presale creation
     address private feeAddress;
-    address private pullOutPenaltyFeeAddress;
     uint16 private maxWhitelistBatch = 100; // default 100, can be updated by owner
     uint8 private platformFee = 2; //@notice fee can be updated up to 10%
     uint8 private constant PRESALE_PULL_OUT_PENALTY_FEE = 2; // @notice fee cannot be changed
@@ -101,6 +100,13 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     event PresaleCreated(
         address indexed presaleOwner,
         PresaleType presaleType,
+        bool whitelistSale,
+        uint256 whitelistStartTime,
+        uint256 whitelistEndTime,
+        uint256 minContribution,
+        uint256 maxContribution,
+        uint256 startTime,
+        uint256 endTime,
         uint256 tokensForSale,
         uint256 hardCap,
         uint256 presaleId
@@ -160,13 +166,11 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     constructor(
         address _initialOwner,
-        address _feeAddress,
-        address _pullOutPenaltyAddress
+        address _feeAddress
     ) Ownable(_initialOwner) {
-        if (_feeAddress == address(0) || _pullOutPenaltyAddress == address(0))
-            revert RaiseX__ErrorAddressCannotBeZeroAddress();
+        if (_feeAddress == address(0))
+            revert ErrorAddressCannotBeZeroAddress();
         feeAddress = _feeAddress;
-        pullOutPenaltyFeeAddress = _pullOutPenaltyAddress;
     }
 
     function createPresale(
@@ -183,9 +187,9 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         bool whiteListSale,
         uint256 wlSaleStartTimeInMinutes,
         uint256 wlSaleEndTimeInMinutes
-    ) external nonReentrant returns (uint256) {
+    ) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         // Convert minutes offset into absolute timestamps
         uint256 startTime = block.timestamp + _minutes(startTimeInMinutes);
@@ -193,31 +197,31 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         // Basic sanity checks
         if (tokenAddress == address(0) || tokensForSale == 0)
-            revert RaiseX__ErrorMissingParam();
+            revert ErrorMissingParam();
 
-        if (endTimeInMinutes == 0) revert RaiseX__ErrorInvalidTimeRange();
+        if (endTimeInMinutes == 0) revert ErrorInvalidTimeRange();
 
         if (tokenAddress == raiseToken)
-            revert RaiseX__ErrorCannotSellPresaleTokenInSameToken();
+            revert ErrorCannotSellPresaleTokenInSameToken();
 
         // Validate time range
-        if (startTime < block.timestamp) revert RaiseX__ErrorInvalidStart();
-        if (endTime <= startTime) revert RaiseX__ErrorInvalidTimeRange();
+        if (startTime < block.timestamp) revert ErrorInvalidStart();
+        if (endTime <= startTime) revert ErrorInvalidTimeRange();
 
         // Contribution range validation
         if (minContribution > maxContribution)
-            revert RaiseX__ErrorInvalidAmount();
+            revert ErrorInvalidAmount();
 
         // Validate presale type and cap logic
         if (presaleType == PresaleType.Fixed) {
-            if (softCap > hardCap) revert RaiseX__ErrorInvalidCap();
-            if (hardCap == 0) revert RaiseX__ErrorInvalidCap();
+            if (softCap > hardCap) revert ErrorInvalidCap();
+            if (hardCap == 0) revert ErrorInvalidCap();
         } else if (presaleType == PresaleType.Dynamic) {
-            if (softCap == 0) revert RaiseX__ErrorInvalidCap();
+            if (softCap == 0) revert ErrorInvalidCap();
             if (hardCap == 0) {
                 hardCap = type(uint256).max;
             }
-        } else revert RaiseX__ErrorInvalidPresaleType();
+        } else revert ErrorInvalidPresaleType();
 
         // --- Whitelist sale validation ---
         uint256 wlStart = 0;
@@ -225,15 +229,15 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (whiteListSale) {
             if (presaleType != PresaleType.Fixed) {
-                revert RaiseX__ErrorInvalidWlSale();
+                revert ErrorInvalidWlSale();
             }
 
             wlStart = block.timestamp + _minutes(wlSaleStartTimeInMinutes);
             wlEnd = block.timestamp + _minutes(wlSaleEndTimeInMinutes);
 
-            if (wlStart < startTime) revert RaiseX__ErrorInvalidWlSale();
-            if (wlEnd > endTime) revert RaiseX__ErrorInvalidWlSale();
-            if (wlEnd <= wlStart) revert RaiseX__ErrorInvalidWlSale();
+            if (wlStart < startTime) revert ErrorInvalidWlSale();
+            if (wlEnd > endTime) revert ErrorInvalidWlSale();
+            if (wlEnd <= wlStart) revert ErrorInvalidWlSale();
         }
 
         // Increment presale counter
@@ -276,15 +280,20 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             tokensForSale
         );
 
-        // TODO event be updated to show wl sale ? start , end of wl sale...
         emit PresaleCreated(
             presaleOwner,
             presaleType,
+            whiteListSale,
+            wlSaleStartTimeInMinutes,
+            wlSaleEndTimeInMinutes,
+            minContribution,
+            maxContribution,
+            startTime,
+            endTime,
             tokensForSale,
             hardCap,
             presaleID
         );
-        return presaleID;
     }
 
     function participateInPresale(
@@ -292,27 +301,27 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         uint256 contribution
     ) external payable nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address contributor = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Presale active window
         if (block.timestamp < p.startTime || block.timestamp > p.endTime)
-            revert RaiseX__ErrorPresaleNotActive();
+            revert ErrorPresaleNotActive();
 
         uint256 amountIn;
         if (p.raiseToken == address(0)) {
             // Native presale: value must be provided in msg.value
-            if (msg.value == 0) revert RaiseX__ErrorInvalidAmount();
+            if (msg.value == 0) revert ErrorInvalidAmount();
             amountIn = msg.value;
         } else {
             // ERC20 presale: caller must not send native value by mistake
-            if (msg.value != 0) revert RaiseX__ErrorInvalidMsgValue();
+            if (msg.value != 0) revert ErrorInvalidMsgValue();
             amountIn = contribution;
-            if (amountIn == 0) revert RaiseX__ErrorInvalidAmount();
+            if (amountIn == 0) revert ErrorInvalidAmount();
         }
 
         // Branch by presale type
@@ -323,7 +332,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             if (p.whiteListSale) {
                 // Too early: presale not open for anyone yet
                 if (block.timestamp < p.whiteListSaleStartTime) {
-                    revert RaiseX__ErrorPresaleNotStarted();
+                    revert ErrorPresaleNotStarted();
                 }
 
                 // Within whitelist window: must be whitelisted
@@ -332,7 +341,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
                     block.timestamp <= p.whitelistSaleEndTime
                 ) {
                     if (!isWhitelisted[presaleId][contributor]) {
-                        revert RaiseX__ErrorNotWhitelisted();
+                        revert ErrorNotWhitelisted();
                     }
                 }
 
@@ -340,20 +349,20 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             }
 
             // check if presale already marked as filled
-            if (p.presaleFilled) revert RaiseX__ErrorPresaleFilled();
+            if (p.presaleFilled) revert ErrorPresaleFilled();
 
             // Check if presale already full
             if (p.amountRaised >= p.hardCap)
-                revert RaiseX__ErrorPresaleFilled();
+                revert ErrorPresaleFilled();
 
             // Per-tx minimum
             if (amountIn < p.minContribution)
-                revert RaiseX__ErrorInvalidAmount();
+                revert ErrorInvalidAmount();
 
             // Per-wallet max check (based on what they'd have after this tx, using requested amount)
             uint256 userTotal = contributed[presaleId][contributor] + amountIn;
             if (userTotal > p.maxContribution)
-                revert RaiseX__ErrorExceedsWalletMax();
+                revert ErrorExceedsWalletMax();
 
             // Compute how much we can actually accept (cap remaining)
             uint256 available = p.hardCap - p.amountRaised;
@@ -397,7 +406,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             if (p.raiseToken == address(0) && take < amountIn) {
                 uint256 refund = amountIn - take;
                 (bool ok, ) = payable(contributor).call{value: refund}("");
-                if (!ok) revert RaiseX__ErrorRefundExcessFilled();
+                if (!ok) revert ErrorRefundExcessFilled();
             }
 
             emit ParticipatedInFixedPresale(contributor, presaleId, take);
@@ -405,11 +414,11 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             // Dynamic presale: accept contributions; allocations occur at finalization
 
             if (amountIn < p.minContribution)
-                revert RaiseX__ErrorInvalidAmount();
+                revert ErrorInvalidAmount();
 
             uint256 userTotal = contributed[presaleId][contributor] + amountIn;
             if (userTotal > p.maxContribution)
-                revert RaiseX__ErrorExceedsWalletMax();
+                revert ErrorExceedsWalletMax();
 
             // For ERC20, pull the full amountIn now
             if (p.raiseToken != address(0)) {
@@ -426,29 +435,29 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
             emit ParticipatedInDynamicPresale(contributor, presaleId, amountIn);
         } else {
-            revert RaiseX__ErrorInvalidPresaleType();
+            revert ErrorInvalidPresaleType();
         }
     }
 
     function pullOut(uint256 presaleId) external nonReentrant {
-        /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        /// pause encase of emergency
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address sender = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Ensure presale is still active
-        if (block.timestamp > p.endTime) revert RaiseX__ErrorPresaleNotActive();
+        if (block.timestamp > p.endTime) revert ErrorPresaleNotActive();
 
         // Disallow pull-out if softCap already reached
-        if (p.amountRaised >= p.softCap) revert RaiseX__ErrorSoftCapReached();
+        if (p.amountRaised >= p.softCap) revert ErrorSoftCapReached();
 
         uint256 contribution = contributed[presaleId][sender];
 
         // Verify contributor has a valid contribution
-        if (contribution == 0) revert RaiseX__ErrorInvalidAmount();
+        if (contribution == 0) revert ErrorInvalidAmount();
 
         // Reset contributor's state before transfers (reentrancy safe)
         contributed[presaleId][sender] = 0;
@@ -467,17 +476,16 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.raiseToken == address(0)) {
             // Refund native token (ETH/BNB/etc.)
-            // TODO instead of sending platform fee every time, increment it and withdraw them any time.
-            (bool ok, ) = payable(pullOutPenaltyFeeAddress).call{value: fee}(
+            (bool ok, ) = payable(feeAddress).call{value: fee}(
                 ""
             );
+            if (!ok) revert ErrorRefundFailed();
 
             (ok, ) = payable(sender).call{value: refund}("");
-            if (!ok) revert RaiseX__ErrorRefundFailed();
+            if (!ok) revert ErrorRefundFailed();
         } else {
             // Refund ERC20 token
-             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
-            IERC20(p.raiseToken).safeTransfer(pullOutPenaltyFeeAddress, fee);
+            IERC20(p.raiseToken).safeTransfer(feeAddress, fee);
             IERC20(p.raiseToken).safeTransfer(sender, refund);
         }
         // Emit contribution withdrawal details
@@ -486,19 +494,19 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     function claimRefund(uint256 presaleId) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address contributor = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Presale must have failed (cancelled by finalize logic)
-        if (!p.cancelled) revert RaiseX__ErrorPresaleNotFailed();
+        if (!p.cancelled) revert ErrorPresaleNotFailed();
 
         uint256 contributedAmount = contributed[presaleId][contributor];
         // Check that the caller has a refundable contribution
-        if (contributedAmount == 0) revert RaiseX__ErrorInvalidAmount();
+        if (contributedAmount == 0) revert ErrorInvalidAmount();
 
         // Reset contributed amount before transferring to prevent reentrancy
         contributed[presaleId][contributor] = 0;
@@ -508,7 +516,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             (bool ok, ) = payable(contributor).call{value: contributedAmount}(
                 ""
             );
-            if (!ok) revert RaiseX__ErrorRefundFailed();
+            if (!ok) revert ErrorRefundFailed();
         } else {
             // Refund ERC20 token
             IERC20(p.raiseToken).safeTransfer(contributor, contributedAmount);
@@ -519,16 +527,16 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     function claimTokens(uint256 presaleId) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address sender = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Presale must be successfully finalized
-        if (!p.finalized) revert RaiseX__ErrorPresaleNotFinalized();
-        if (p.cancelled) revert RaiseX__ErrorPresaleFailed();
+        if (!p.finalized) revert ErrorPresaleNotFinalized();
+        if (p.cancelled) revert ErrorPresaleFailed();
 
         if (p.presaleType == PresaleType.Fixed) {
             // --- Fixed Presale Allocation ---
@@ -536,7 +544,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             // Get pre-computed owed tokens
             uint256 amount = claimable[presaleId][sender];
 
-            if (amount == 0) revert RaiseX__ErrorInvalidAmount();
+            if (amount == 0) revert ErrorInvalidAmount();
 
             // Reset balances before transfer
             claimable[presaleId][sender] = 0;
@@ -551,7 +559,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
             uint256 contribution = contributed[presaleId][sender];
 
-            if (contribution == 0) revert RaiseX__ErrorInvalidAmount();
+            if (contribution == 0) revert ErrorInvalidAmount();
 
             // Reset contribution before calculation
             contributed[presaleId][sender] = 0;
@@ -562,7 +570,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
                 p.amountRaised,
                 p.tokensForSale
             );
-            if (amount == 0) revert RaiseX__ErrorInvalidAmount();
+            if (amount == 0) revert ErrorInvalidAmount();
 
             // Safety check: ensure not exceeding total tokens for sale
             if (p.tokensSold + amount > p.tokensForSale) {
@@ -573,29 +581,29 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             IERC20(p.token).safeTransfer(sender, amount);
 
             emit TokenClaim(sender, presaleId, amount, p.presaleType);
-        } else revert RaiseX__ErrorInvalidPresaleType();
+        } else revert ErrorInvalidPresaleType();
     }
 
     function withdrawTokensOnCancelledPresale(
         uint256 presaleId
     ) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address owner = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Must be a cancelled presale (failed)
-        if (!p.cancelled) revert RaiseX__ErrorNotCancelledPresale();
+        if (!p.cancelled) revert ErrorNotCancelledPresale();
 
         // Only the presale owner can recover the tokens
-        if (owner != p.owner) revert RaiseX__ErrorUnAuthorized();
+        if (owner != p.owner) revert ErrorUnAuthorized();
 
         // Amount to withdraw is the full escrowed sale allocation
         uint256 amount = p.tokensForSale;
-        if (amount == 0) revert RaiseX__ErrorInvalidAmount();
+        if (amount == 0) revert ErrorInvalidAmount();
 
         // Mark-before-interaction for idempotency & reentrancy posture
         p.tokensForSale = 0;
@@ -608,21 +616,21 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     function finalizePresale(uint256 presaleId) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
         address caller = msg.sender;
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Cannot finalize while presale is still running
         if (block.timestamp <= p.endTime) {
-            revert RaiseX__ErrorPresaleStillActive();
+            revert ErrorPresaleStillActive();
         }
 
         // Prevent re-finalization or double cancellation
         if (p.finalized || p.cancelled) {
-            revert RaiseX__ErrorAlreadyFinalized();
+            revert ErrorAlreadyFinalized();
         }
 
         // Case 1: Presale successful + within 24hr grace period
@@ -664,26 +672,26 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             emit PresaleFailed(p.presaleId);
         }
         // Fallback: Any unauthorized attempt
-        else revert RaiseX__ErrorUnAuthorized();
+        else revert ErrorUnAuthorized();
     }
 
     function withdrawPresaleFunds(uint256 presaleId) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Ensure presale has been finalized before withdrawal
-        if (!p.finalized) revert RaiseX__ErrorPresaleNotFinalized();
+        if (!p.finalized) revert ErrorPresaleNotFinalized();
 
         // Prevent multiple withdrawals
         if (p.presaleFundsWithdrawn)
-            revert RaiseX__ErrorFundsAlreadyWithdrawn();
+            revert ErrorFundsAlreadyWithdrawn();
 
         // Only presale owner can withdraw
-        if (msg.sender != p.owner) revert RaiseX__ErrorUnAuthorized();
+        if (msg.sender != p.owner) revert ErrorUnAuthorized();
 
         // Mark as withdrawn before transfer to prevent reentrancy
         p.presaleFundsWithdrawn = true;
@@ -706,30 +714,27 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.raiseToken == address(0)) {
             // Native token withdrawal (e.g. ETH/BNB)
-             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             (bool ok1, ) = payable(feeAddress).call{value: fee}("");
-            if (!ok1) revert RaiseX__ErrorWithdrawFailed();
+            if (!ok1) revert ErrorWithdrawFailed();
             (bool ok2, ) = payable(p.owner).call{value: payout}("");
-            if (!ok2) revert RaiseX__ErrorWithdrawFailed();
+            if (!ok2) revert ErrorWithdrawFailed();
         } else {
             // ERC20 token withdrawal
-             // TODO instead of sending platform fee every time, increment it and withdraw them any time.
             IERC20(p.raiseToken).safeTransfer(feeAddress, fee);
             IERC20(p.raiseToken).safeTransfer(p.owner, payout);
         }
 
         // Log withdrawal details
-        // TODO event should now emit amount so we listen directly from the frontend
         emit PresaleFundsWithdrawn(p.presaleId, p.owner, payout, fee);
     }
 
     function withdrawLeftOverTokens(uint256 presaleId) external nonReentrant {
         /// pause incase of emergency
-        if (paused()) revert RaiseX__ErrorFunctionalityIsPaused();
+        if (paused()) revert ErrorFunctionalityIsPaused();
 
         Presale storage p = presale[presaleId];
 
-        if (p.owner == address(0)) revert RaiseX__ErrorInvalidPresaleId();
+        if (p.owner == address(0)) revert ErrorInvalidPresaleId();
 
         // Validate conditions
         if (
@@ -738,7 +743,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             !p.finalized || // must be finalized
             p.presaleType != PresaleType.Fixed || // only fixed presale supported
             p.leftOverTokensWithdrawn // cannot withdraw twice
-        ) revert RaiseX__ErrorUnAuthorized();
+        ) revert ErrorUnAuthorized();
 
         // Calculate leftovers
         uint256 leftover = p.tokensForSale - p.tokensSold;
@@ -752,7 +757,6 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         uint256 payout = leftover - fee;
 
         // Transfer tokens
-         // TODO instead of sending platform fee every time, increment it and withdraw them any time.
         IERC20(p.token).safeTransfer(feeAddress, fee);
         IERC20(p.token).safeTransfer(p.owner, payout);
 
@@ -781,26 +785,18 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     }
 
     function setPlatformFee(uint8 newPlatformFee) external onlyOwner {
-        if (newPlatformFee > 10) revert RaiseX__ErrorFeeTooHigh(newPlatformFee);
+        if (newPlatformFee > 10) revert ErrorFeeTooHigh(newPlatformFee);
         platformFee = newPlatformFee;
     }
 
     function setFeeAddress(address newFeeAddress) external onlyOwner {
         if (newFeeAddress == address(0))
-            revert RaiseX__ErrorAddressCannotBeZeroAddress();
+            revert ErrorAddressCannotBeZeroAddress();
         feeAddress = newFeeAddress;
     }
 
-    function setPullOutPenaltyFeeAddress(
-        address newPullOutFeeAddress
-    ) external onlyOwner {
-        if (newPullOutFeeAddress == address(0))
-            revert RaiseX__ErrorAddressCannotBeZeroAddress();
-        pullOutPenaltyFeeAddress = newPullOutFeeAddress;
-    }
-
     function setMaxWhitelistBatch(uint16 newMax) external onlyOwner {
-        if (newMax == 0) revert RaiseX__ErrorInvalidNumber(newMax);
+        if (newMax == 0) revert ErrorInvalidNumber(newMax);
         maxWhitelistBatch = newMax;
     }
 
@@ -810,16 +806,16 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     ) external {
         Presale storage p = presale[presaleId];
 
-        if (msg.sender != p.owner) revert RaiseX__ErrorUnAuthorized();
-        if (!p.whiteListSale) revert RaiseX__ErrorNotWhitelistSale();
+        if (msg.sender != p.owner) revert ErrorUnAuthorized();
+        if (!p.whiteListSale) revert ErrorNotWhitelistSale();
 
         if (block.timestamp > p.whitelistSaleEndTime)
-            revert RaiseX__ErrorWhitelistNotActive();
+            revert ErrorWhitelistNotActive();
 
         uint256 addressLength = whitelistedAddresses.length;
 
         if (addressLength > maxWhitelistBatch)
-            revert RaiseX__ErrorBatchExceedsMaxAllowed(maxWhitelistBatch);
+            revert ErrorBatchExceedsMaxAllowed(maxWhitelistBatch);
 
         // Push new addresses
         for (uint256 i = 0; i < addressLength; i++) {
@@ -841,14 +837,14 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
     ) external {
         Presale storage p = presale[presaleId];
 
-        if (msg.sender != p.owner) revert RaiseX__ErrorUnAuthorized();
-        if (!p.whiteListSale) revert RaiseX__ErrorNotWhitelistSale();
+        if (msg.sender != p.owner) revert ErrorUnAuthorized();
+        if (!p.whiteListSale) revert ErrorNotWhitelistSale();
         if (block.timestamp > p.whitelistSaleEndTime)
-            revert RaiseX__ErrorWhitelistNotActive();
+            revert ErrorWhitelistNotActive();
 
         uint256 length = addressesToRemove.length;
         if (length > maxWhitelistBatch)
-            revert RaiseX__ErrorBatchExceedsMaxAllowed(maxWhitelistBatch);
+            revert ErrorBatchExceedsMaxAllowed(maxWhitelistBatch);
 
         for (uint256 i = 0; i < length; i++) {
             address user = addressesToRemove[i];
@@ -868,59 +864,5 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     function unpause() external onlyOwner {
         _unpause();
-    }
-
-    /// Getter functions
-    /**
-     * @notice function can be called by anyone
-     * returns the platform fee amount
-     */
-    function getPlatformFee() external view returns (uint8) {
-        return platformFee;
-    }
-
-    /**
-     * @notice function can be called by anyone
-     * returns the platform fee address
-     */
-    function getPlatformFeeAddress() external view returns (address) {
-        return feeAddress;
-    }
-
-    /**
-     * @notice function can be called by anyone
-     * returns presalePullOutPenalty fee
-     * this fee is set to discourage missUse of the pullout function
-     *
-     * The fee cannot be changed by anyone after deployment, this is trust implemented in code
-     */
-    function getPullOutPenaltyFee() external pure returns (uint8) {
-        return PRESALE_PULL_OUT_PENALTY_FEE;
-    }
-
-    /**
-     * @notice function can be called by anyone
-     * returns the pullOutFee address
-     */
-    function getPullOutFeeAddress() external view returns (address) {
-        return pullOutPenaltyFeeAddress;
-    }
-
-    function getPresale(
-        uint256 presaleId
-    ) external view returns (Presale memory) {
-        return presale[presaleId];
-    }
-
-    function getMyContribution(
-        uint256 presaleId
-    ) external view returns (uint256) {
-        return contributed[presaleId][msg.sender];
-    }
-
-    function getWhiteListStatus(
-        uint256 presaleId
-    ) external view returns (bool) {
-        return isWhitelisted[presaleId][msg.sender];
     }
 }
