@@ -85,12 +85,37 @@ contract RaiseXTokenSalePlatform is
         // Whitelist
         bool whiteListSale; // @notice applies only for fixed sales
     }
-    // // TODO populate struct
-    // struct ViewPresale {
+    struct ViewPresale {
+        PresaleType presaleType;
+        uint256 presaleId;
+        uint256 tokensForSale;
+        uint256 tokensSold;
+        uint256 softCap;
+        uint256 hardCap;
+        uint256 minContribution;
+        uint256 maxContribution;
+        uint256 startTime;
+        uint256 endTime;
+        uint256 amountRaised;
+        uint256 whiteListSaleStartTime;
+        uint256 whitelistSaleEndTime;
+        address token;
+        address raiseToken;
+        address owner;
+        bool presaleFilled;
+        bool finalized;
+        bool cancelled;
+        bool presaleFundsWithdrawn;
+        bool leftOverTokensWithdrawn;
+        bool whiteListSale;
+    }
 
-    // }
-    // // TODO populate struct
-    // struct Contributor { // }
+    struct Contributor {
+        address account;
+        uint256 contributed; // funds they’ve sent
+        uint256 claimable; // tokens they can claim (in fixed presale)
+        bool isWhitelisted;
+    }
 
     mapping(uint256 presaleId => Presale) private presale;
     mapping(uint256 presaleId => mapping(address contributor => uint256 contribution))
@@ -1001,5 +1026,50 @@ contract RaiseXTokenSalePlatform is
         );
         // Return global visibility rules
         return VisibilityConfig(ContractCfg.PRIVATE, eventLogConfigs);
+    }
+
+    function getPresale(
+        uint256 _presaleId
+    ) external view returns (ViewPresale memory) {
+        Presale storage p = presale[_presaleId];
+
+        return
+            ViewPresale({
+                presaleType: p.presaleType,
+                presaleId: p.presaleId,
+                tokensForSale: p.tokensForSale,
+                tokensSold: p.tokensSold,
+                softCap: p.softCap,
+                hardCap: p.hardCap,
+                minContribution: p.minContribution,
+                maxContribution: p.maxContribution,
+                startTime: p.startTime,
+                endTime: p.endTime,
+                amountRaised: p.amountRaised,
+                whiteListSaleStartTime: p.whiteListSaleStartTime,
+                whitelistSaleEndTime: p.whitelistSaleEndTime,
+                token: p.token,
+                raiseToken: p.raiseToken,
+                owner: p.owner,
+                presaleFilled: p.presaleFilled,
+                finalized: p.finalized,
+                cancelled: p.cancelled,
+                presaleFundsWithdrawn: p.presaleFundsWithdrawn,
+                leftOverTokensWithdrawn: p.leftOverTokensWithdrawn,
+                whiteListSale: p.whiteListSale
+            });
+    }
+
+    function getContributor(
+        uint256 _presaleId,
+        address _user
+    ) external view returns (Contributor memory) {
+        return
+            Contributor({
+                account: _user,
+                contributed: contributed[_presaleId][_user],
+                claimable: claimable[_presaleId][_user],
+                isWhitelisted: isWhitelisted[_presaleId][_user]
+            });
     }
 }
