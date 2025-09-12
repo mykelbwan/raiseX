@@ -43,7 +43,12 @@ error ErrorBatchExceedsMaxAllowed(uint256);
 error ErrorInvalidNumber(uint16);
 error ErrorFunctionalityIsPaused();
 
-contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
+contract RaiseXTokenSalePlatform is
+    ReentrancyGuard,
+    Ownable,
+    Pausable,
+    ContractTransparencyConfig
+{
     using SafeERC20 for IERC20;
 
     enum PresaleType {
@@ -80,15 +85,22 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         // Whitelist
         bool whiteListSale; // @notice applies only for fixed sales
     }
+    // // TODO populate struct
+    // struct ViewPresale {
+
+    // }
+    // // TODO populate struct
+    // struct Contributor { // }
 
     mapping(uint256 presaleId => Presale) private presale;
     mapping(uint256 presaleId => mapping(address contributor => uint256 contribution))
         private contributed; // funds
     mapping(uint256 presaleId => mapping(address contributor => uint256 amount))
         private claimable; // amount in fixed presale. tokens are computed on contributing
-    mapping(uint256 => mapping(address => bool)) private isWhitelisted;
+    mapping(uint256 presaleId => mapping(address contributor => bool))
+        private isWhitelisted;
     mapping(address token => uint256 amount) private totalRaisedByToken;
-    mapping(uint256 => bool) presaleCounted; // track which presaleIDs have already been counted
+    mapping(uint256 presaleId => bool) presaleCounted; // track which presaleIDs have already been counted
 
     uint256 public totalProjectsRaised; // track total number of projects that have raised on the platform
     uint256 private presaleCounter; // incremented at each presale creation
@@ -168,8 +180,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         address _initialOwner,
         address _feeAddress
     ) Ownable(_initialOwner) {
-        if (_feeAddress == address(0))
-            revert ErrorAddressCannotBeZeroAddress();
+        if (_feeAddress == address(0)) revert ErrorAddressCannotBeZeroAddress();
         feeAddress = _feeAddress;
     }
 
@@ -209,8 +220,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         if (endTime <= startTime) revert ErrorInvalidTimeRange();
 
         // Contribution range validation
-        if (minContribution > maxContribution)
-            revert ErrorInvalidAmount();
+        if (minContribution > maxContribution) revert ErrorInvalidAmount();
 
         // Validate presale type and cap logic
         if (presaleType == PresaleType.Fixed) {
@@ -352,17 +362,14 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
             if (p.presaleFilled) revert ErrorPresaleFilled();
 
             // Check if presale already full
-            if (p.amountRaised >= p.hardCap)
-                revert ErrorPresaleFilled();
+            if (p.amountRaised >= p.hardCap) revert ErrorPresaleFilled();
 
             // Per-tx minimum
-            if (amountIn < p.minContribution)
-                revert ErrorInvalidAmount();
+            if (amountIn < p.minContribution) revert ErrorInvalidAmount();
 
             // Per-wallet max check (based on what they'd have after this tx, using requested amount)
             uint256 userTotal = contributed[presaleId][contributor] + amountIn;
-            if (userTotal > p.maxContribution)
-                revert ErrorExceedsWalletMax();
+            if (userTotal > p.maxContribution) revert ErrorExceedsWalletMax();
 
             // Compute how much we can actually accept (cap remaining)
             uint256 available = p.hardCap - p.amountRaised;
@@ -413,12 +420,10 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         } else if (p.presaleType == PresaleType.Dynamic) {
             // Dynamic presale: accept contributions; allocations occur at finalization
 
-            if (amountIn < p.minContribution)
-                revert ErrorInvalidAmount();
+            if (amountIn < p.minContribution) revert ErrorInvalidAmount();
 
             uint256 userTotal = contributed[presaleId][contributor] + amountIn;
-            if (userTotal > p.maxContribution)
-                revert ErrorExceedsWalletMax();
+            if (userTotal > p.maxContribution) revert ErrorExceedsWalletMax();
 
             // For ERC20, pull the full amountIn now
             if (p.raiseToken != address(0)) {
@@ -476,9 +481,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
         if (p.raiseToken == address(0)) {
             // Refund native token (ETH/BNB/etc.)
-            (bool ok, ) = payable(feeAddress).call{value: fee}(
-                ""
-            );
+            (bool ok, ) = payable(feeAddress).call{value: fee}("");
             if (!ok) revert ErrorRefundFailed();
 
             (ok, ) = payable(sender).call{value: refund}("");
@@ -687,8 +690,7 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
         if (!p.finalized) revert ErrorPresaleNotFinalized();
 
         // Prevent multiple withdrawals
-        if (p.presaleFundsWithdrawn)
-            revert ErrorFundsAlreadyWithdrawn();
+        if (p.presaleFundsWithdrawn) revert ErrorFundsAlreadyWithdrawn();
 
         // Only presale owner can withdraw
         if (msg.sender != p.owner) revert ErrorUnAuthorized();
@@ -864,5 +866,140 @@ contract RaiseXTokenSalePlatform is ReentrancyGuard, Ownable, Pausable {
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function _hashEvent(
+        string memory eventSignature
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(eventSignature));
+    }
+
+    function visibilityRules() external pure returns (VisibilityConfig memory) {
+        EventLogConfig[] memory eventLogConfigs = new EventLogConfig[](13);
+
+        bytes32 presaleCreatedSig = _hashEvent(
+            "PresaleCreated(address,PresaleType,bool,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)"
+        );
+        Field[] memory relevantToPresaleCreatedSig = new Field[](1);
+        relevantToPresaleCreatedSig[0] = Field.EVERYONE;
+        eventLogConfigs[0] = EventLogConfig(
+            presaleCreatedSig,
+            relevantToPresaleCreatedSig
+        );
+
+        bytes32 fixedPresaleParticipationSig = _hashEvent(
+            "ParticipatedInFixedPresale(address,uint256,uint256)"
+        );
+        Field[] memory relevantToFixedPresaleParticipant = new Field[](1);
+        relevantToFixedPresaleParticipant[0] = Field.TOPIC1;
+        eventLogConfigs[1] = EventLogConfig(
+            fixedPresaleParticipationSig,
+            relevantToFixedPresaleParticipant
+        );
+
+        bytes32 dynamicPresaleParticipationSig = _hashEvent(
+            "ParticipatedInDynamicPresale(address,uint256,uint256)"
+        );
+        Field[] memory relevantToDynamicPresaleParticipant = new Field[](1);
+        relevantToDynamicPresaleParticipant[0] = Field.TOPIC1;
+        eventLogConfigs[2] = EventLogConfig(
+            dynamicPresaleParticipationSig,
+            relevantToDynamicPresaleParticipant
+        );
+
+        bytes32 tokensClaimSig = _hashEvent(
+            "TokenClaim(address,uint256,uint256,PresaleType)"
+        );
+        Field[] memory relevantToTokensClaim = new Field[](1);
+        relevantToTokensClaim[0] = Field.TOPIC1;
+        eventLogConfigs[3] = EventLogConfig(
+            tokensClaimSig,
+            relevantToTokensClaim
+        );
+
+        bytes32 presaleFinalizedSig = _hashEvent(
+            "PresaleFinalized(uint256,address,uint256,uint256)"
+        );
+        Field[] memory relevantToPresaleFinalized = new Field[](1);
+        relevantToPresaleFinalized[0] = Field.EVERYONE;
+        eventLogConfigs[4] = EventLogConfig(
+            presaleFinalizedSig,
+            relevantToPresaleFinalized
+        );
+
+        bytes32 leftOverTokensWithdrawSig = _hashEvent(
+            "LeftoverTokensWithdrawn(uint256,address,uint256,uint256)"
+        );
+        Field[] memory relevantToLeftOverTokensWithdraw = new Field[](1);
+        relevantToLeftOverTokensWithdraw[0] = Field.EVERYONE;
+        eventLogConfigs[5] = EventLogConfig(
+            leftOverTokensWithdrawSig,
+            relevantToLeftOverTokensWithdraw
+        );
+
+        bytes32 refundedSig = _hashEvent("Refunded(uint256,address,uint256)");
+        Field[] memory relevantToRefunded = new Field[](1);
+        relevantToRefunded[0] = Field.TOPIC2;
+        eventLogConfigs[6] = EventLogConfig(refundedSig, relevantToRefunded);
+
+        bytes32 presaleFundsWithdrawnSig = _hashEvent(
+            "PresaleFundsWithdrawn(uint256,address,uint256,uint256)"
+        );
+        Field[] memory relevantToPresaleFundsWithdrawn = new Field[](1);
+        relevantToPresaleFundsWithdrawn[0] = Field.EVERYONE;
+        eventLogConfigs[7] = EventLogConfig(
+            presaleFundsWithdrawnSig,
+            relevantToPresaleFundsWithdrawn
+        );
+
+        bytes32 contributionWithdrawnSig = _hashEvent(
+            "ContributionWithdrawn(address,uint256,uint256)"
+        );
+        Field[] memory relevantToContributionWithdrawn = new Field[](1);
+        relevantToContributionWithdrawn[0] = Field.TOPIC1;
+        eventLogConfigs[8] = EventLogConfig(
+            contributionWithdrawnSig,
+            relevantToContributionWithdrawn
+        );
+
+        bytes32 presaleFailSig = _hashEvent("PresaleFailed(uint256)");
+        Field[] memory relevantToPresaleFail = new Field[](1);
+        relevantToPresaleFail[0] = Field.EVERYONE;
+        eventLogConfigs[9] = EventLogConfig(
+            presaleFailSig,
+            relevantToPresaleFail
+        );
+
+        bytes32 failPresaleTokensWithdrawnSig = _hashEvent(
+            "CancelledPresaleTokensWithdrawn(uint256,address,uint256)"
+        );
+        Field[] memory relevantToFailedPresaleTokensWithdrawn = new Field[](1);
+        relevantToFailedPresaleTokensWithdrawn[0] = Field.EVERYONE;
+        eventLogConfigs[10] = EventLogConfig(
+            failPresaleTokensWithdrawnSig,
+            relevantToFailedPresaleTokensWithdrawn
+        );
+
+        bytes32 whiteLisAddressesAddedSig = _hashEvent(
+            "WhitelistedAddressesAdded(uint256)"
+        );
+        Field[] memory relevantToWhiteListAddressesAdded = new Field[](1);
+        relevantToWhiteListAddressesAdded[0] = Field.EVERYONE;
+        eventLogConfigs[11] = EventLogConfig(
+            whiteLisAddressesAddedSig,
+            relevantToWhiteListAddressesAdded
+        );
+
+        bytes32 whiteListAddressesRemovedSig = _hashEvent(
+            " WhitelistedAddressesRemoved(uint256)"
+        );
+        Field[] memory relevantToWhiteListedAddressesRemoved = new Field[](1);
+        relevantToWhiteListedAddressesRemoved[0] = Field.EVERYONE;
+        eventLogConfigs[12] = EventLogConfig(
+            whiteListAddressesRemovedSig,
+            relevantToWhiteListedAddressesRemoved
+        );
+        // Return global visibility rules
+        return VisibilityConfig(ContractCfg.PRIVATE, eventLogConfigs);
     }
 }

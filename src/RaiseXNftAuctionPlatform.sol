@@ -8,6 +8,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
+import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 
 error InvalidTimeRange();
 error ReserveMustBeGreaterThanZero();
@@ -32,6 +33,7 @@ contract RaiseXNftAuctionPlatform is
     Ownable,
     ReentrancyGuard,
     Pausable,
+    ERC721Holder,
     ContractTransparencyConfig
 {
     using SafeERC20 for IERC20;
@@ -61,9 +63,7 @@ contract RaiseXNftAuctionPlatform is
         uint256 highestBid;
         uint256 extensionWindow;
         address paymentToken;
-        address highestBidder;
         address nftAddress;
-        address owner;
         uint256 auctionId;
         uint256 tokenId;
         bool settled;
@@ -71,8 +71,6 @@ contract RaiseXNftAuctionPlatform is
 
     struct PlatformView {
         uint32 platformFee;
-        address platformFeeRecipient;
-        bool isPaused;
     }
 
     mapping(uint256 auctionId => Auction) private auctions; // auctionId => Auction
@@ -145,9 +143,12 @@ contract RaiseXNftAuctionPlatform is
             revert NotNftOwner();
         }
 
-        // Approval check
-        if (!IERC721(_nftAddress).isApprovedForAll(owner, address(this)))
+        if (
+            IERC721(_nftAddress).getApproved(_tokenId) != address(this) &&
+            !IERC721(_nftAddress).isApprovedForAll(owner, address(this))
+        ) {
             revert NotApprovedForTransfer();
+        }
 
         // Transfer NFT into escrow
         IERC721(_nftAddress).safeTransferFrom(owner, address(this), _tokenId);
@@ -431,7 +432,6 @@ contract RaiseXNftAuctionPlatform is
         return
             AuctionView({
                 auctionId: a.auctionId,
-                owner: a.owner,
                 nftAddress: a.nftAddress,
                 tokenId: a.tokenId,
                 reservePrice: a.reservePrice,
@@ -440,19 +440,13 @@ contract RaiseXNftAuctionPlatform is
                 startTime: a.startTime,
                 endTime: a.endTime,
                 extensionWindow: a.extensionWindow,
-                highestBidder: a.highestBidder,
                 highestBid: a.highestBid,
                 settled: a.settled,
                 paymentToken: a.paymentToken
             });
     }
 
-    function getPlatformInfo() external view returns (PlatformView memory) {
-        return
-            PlatformView({
-                platformFee: PLATFORM_FEE,
-                platformFeeRecipient: platformFeeRecipient,
-                isPaused: paused()
-            });
+    function getPlatformInfo() external pure returns (PlatformView memory) {
+        return PlatformView({platformFee: PLATFORM_FEE});
     }
 }
