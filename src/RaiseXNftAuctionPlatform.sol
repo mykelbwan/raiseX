@@ -91,6 +91,7 @@ contract RaiseXNftAuctionPlatform is
         uint256 _startTimeInHours,
         uint256 _endTimeInHours,
         uint256 _extensionWindow,
+        uint256 _auctionId,
         address _paymentToken
     );
     event BidPlaced(
@@ -181,6 +182,7 @@ contract RaiseXNftAuctionPlatform is
             startTime,
             endTime,
             _extensionWindow,
+            auctionId,
             _paymentToken
         );
     }
@@ -366,7 +368,7 @@ contract RaiseXNftAuctionPlatform is
         EventLogConfig[] memory eventLogConfigs = new EventLogConfig[](5);
 
         bytes32 auctionCreatedSig = _hashEvent(
-            "AuctionCreated(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,address)"
+            "AuctionCreated(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,address)"
         );
         Field[] memory relevantToAuctionCreated = new Field[](1);
         relevantToAuctionCreated[0] = Field.EVERYONE;
