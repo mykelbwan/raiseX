@@ -91,7 +91,6 @@ contract RaiseXNftAuctionPlatform is
     mapping(uint256 auctionId => Auction) private auctions; // auctionId => Auction
 
     uint256 private constant MIN_AUCTION_DURATION = 1 hours; // enforce minimum
-    uint256 private constant EXTENSION_WINDOW_MAX = 1 hours;
     address private platformFeeRecipient;
     uint256 private auctionCounter;
     uint32 private constant PLATFORM_FEE = 3; //3%
@@ -146,11 +145,7 @@ contract RaiseXNftAuctionPlatform is
 
         uint256 startTime = block.timestamp + _hours(_startTimeInHours);
         uint256 endTime = block.timestamp + _hours(_endTimeInHours);
-        uint256 extensionWindow = block.timestamp +
-            (_extensionWindowInMinutes * 1 minutes);
 
-        if (extensionWindow > EXTENSION_WINDOW_MAX)
-            revert ExtensionWindowTooLong();
         if (endTime <= startTime) revert InvalidTimeRange();
         if (endTime - startTime < MIN_AUCTION_DURATION)
             revert AuctionTooShort();
@@ -182,7 +177,7 @@ contract RaiseXNftAuctionPlatform is
             buyoutPrice: _buyoutPrice,
             startTime: startTime,
             endTime: endTime,
-            extensionWindow: extensionWindow,
+            extensionWindow: _extensionWindowInMinutes,
             highestBidder: address(0),
             highestBid: 0,
             settled: false,
@@ -196,7 +191,7 @@ contract RaiseXNftAuctionPlatform is
             _buyoutPrice,
             startTime,
             endTime,
-            extensionWindow,
+            _extensionWindowInMinutes,
             auctionId,
             _paymentToken
         );
