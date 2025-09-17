@@ -142,10 +142,7 @@ contract RaiseXNftAuctionPlatform is
             revert NotNftOwner();
         }
 
-        if (
-            IERC721(_nftAddress).getApproved(_tokenId) != address(this) &&
-            !IERC721(_nftAddress).isApprovedForAll(owner, address(this))
-        ) {
+        if (IERC721(_nftAddress).getApproved(_tokenId) != address(this)) {
             revert NotApprovedForTransfer();
         }
 
