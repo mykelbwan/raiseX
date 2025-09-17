@@ -74,8 +74,6 @@ contract RaiseXNftAuctionPlatform is
     }
 
     mapping(uint256 auctionId => Auction) private auctions; // auctionId => Auction
-    mapping(uint256 auctionId => mapping(address bidder => uint256 bid))
-        private bids; // auctionId => bidder => amount
 
     uint256 private constant MIN_AUCTION_DURATION = 1 hours; // enforce minimum
     address private platformFeeRecipient;
@@ -405,7 +403,7 @@ contract RaiseXNftAuctionPlatform is
         bytes32 auctionCancelledSig = _hashEvent("AuctionCancelled(uint256)");
         Field[] memory relevantToAuctionCancelled = new Field[](1);
         relevantToAuctionCancelled[0] = Field.EVERYONE;
-        eventLogConfigs[1] = EventLogConfig(
+        eventLogConfigs[4] = EventLogConfig(
             auctionCancelledSig,
             relevantToAuctionCancelled
         );
