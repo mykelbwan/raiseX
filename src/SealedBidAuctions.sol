@@ -14,11 +14,11 @@ error InvalidEndTime();
 error InvalidReservePrice();
 error InvalidTimeRange();
 error AuctionNotSettled();
-error AuctionCancel();
+error AuctionFailed();
 error PaymentFail();
 error AlreadyClaimed();
 error UnAuthorized();
-error ContractPaused();
+error NoRefund();
 error AuctionNotStarted();
 error AuctionEnded();
 error AuctionAlreadySettled();
@@ -30,6 +30,7 @@ error NotApprovedForTransfer();
 error ZeroAddress();
 error ErrorInvalidMsgValue();
 error ErrorInvalidAmount();
+error ContractPaused();
 
 contract SealedBidAuctions is
     Ownable,
@@ -54,7 +55,7 @@ contract SealedBidAuctions is
         uint256 highestBid;
         uint256 totalBids;
         bool settled;
-        bool canceled;
+        bool success;
     }
 
     struct Bids {
@@ -87,7 +88,7 @@ contract SealedBidAuctions is
         uint256 highestBid;
         uint256 totalBids;
         bool settled;
-        bool cancelled;
+        bool success;
     }
 
     struct BidderAuctionView {
@@ -102,9 +103,15 @@ contract SealedBidAuctions is
         bool claimed; // true if refund already claimed
     }
 
-    struct AuctionOwnerView {
-        address owner;
+    struct AuctionCreatorView {
+        address nftAddress;
+        address highestBidder;
+        uint256 highestBid;
+        uint256 totalBids;
+        uint256 tokenId;
         uint256 sellerProceeds;
+        bool settled;
+        bool success;
         bool claimed;
     }
 
@@ -115,6 +122,7 @@ contract SealedBidAuctions is
     mapping(uint256 aId => mapping(address bidder => AuctionRefund))
         private auctionRefunds;
     mapping(address bidder => uint256[]) private bidderAuctions;
+    mapping(address aCreator => uint[]) private auctionsCreated;
 
     address private platformFeeRecipient;
     uint256 private auctionCounter;
@@ -186,6 +194,7 @@ contract SealedBidAuctions is
 
         auctionCounter++;
         uint256 auctionId = auctionCounter;
+        auctionsCreated[owner].push(auctionId);
 
         auctions[auctionId] = Auction({
             auctionId: auctionId,
@@ -200,7 +209,7 @@ contract SealedBidAuctions is
             highestBid: 0,
             totalBids: 0,
             settled: false,
-            canceled: false,
+            success: false,
             paymentToken: _paymentToken
         });
 
@@ -223,7 +232,7 @@ contract SealedBidAuctions is
     ) external payable nonReentrant {
         if (paused()) revert ContractPaused();
         Auction storage a = auctions[_auctionId];
-        if (a.settled || a.canceled) revert AuctionAlreadySettled();
+        if (a.settled) revert AuctionAlreadySettled();
         if (block.timestamp < a.startTime) revert AuctionNotStarted();
         if (block.timestamp > a.commitEndTime) revert AuctionEnded();
 
@@ -298,14 +307,18 @@ contract SealedBidAuctions is
         if (paused()) revert ContractPaused();
 
         Auction storage a = auctions[_auctionId];
+        address sndr = msg.sender;
 
-        if (a.settled || a.canceled) revert AuctionAlreadySettled();
+        if (sndr != a.owner || sndr != owner() || sndr != platformFeeRecipient)
+            revert UnAuthorized();
+        if (a.settled) revert AuctionAlreadySettled();
         if (block.timestamp < a.commitEndTime) revert AuctionStillActive();
 
         a.settled = true;
 
         // No bids → return NFT to seller
         if (a.highestBidder == address(0)) {
+            a.success = false;
             IERC721(a.nftAddress).safeTransferFrom(
                 address(this),
                 a.owner,
@@ -314,7 +327,7 @@ contract SealedBidAuctions is
             emit AuctionSettled(_auctionId, a.highestBid, a.highestBidder);
             return;
         }
-
+        a.success = true;
         // 1) Transfer NFT to winner
         IERC721(a.nftAddress).safeTransferFrom(
             address(this),
@@ -349,12 +362,15 @@ contract SealedBidAuctions is
     function withdraw(uint256 _auctionId) external nonReentrant {
         if (paused()) revert ContractPaused();
         Auction storage a = auctions[_auctionId];
+
         if (!a.settled) revert AuctionNotSettled();
-        if (a.canceled) revert AuctionCancel();
+        if (!a.success) revert AuctionFailed();
 
         address owner = msg.sender;
+
         if (owner != a.owner || owner != platformFeeRecipient)
             revert UnAuthorized();
+
         PendingPayment storage p = pendingPayment[_auctionId][owner];
 
         if (p.amount == 0) revert PaymentFail();
@@ -376,11 +392,14 @@ contract SealedBidAuctions is
         emit Withdrawn(_auctionId, owner, amount);
     }
 
+    // for auction loosers
     function claimRefund(uint256 _auctionId) external nonReentrant {
         if (paused()) revert ContractPaused();
+
         Auction storage a = auctions[_auctionId];
+
         if (!a.settled) revert AuctionNotSettled();
-        if (a.canceled) revert AuctionCancel();
+        if (!a.success) revert NoRefund();
 
         address bidder = msg.sender;
         AuctionRefund storage r = auctionRefunds[_auctionId][bidder];
@@ -401,26 +420,6 @@ contract SealedBidAuctions is
             token.safeTransfer(bidder, amount);
         }
         emit Refund(a.auctionId, amount);
-    }
-
-    function cancelAuction(uint256 _auctionId) external nonReentrant {
-        if (paused()) revert ContractPaused();
-
-        Auction storage a = auctions[_auctionId];
-
-        if (msg.sender != a.owner) revert UnAuthorized();
-        if (a.settled || a.canceled) revert AuctionAlreadySettled();
-        if (a.highestBidder != address(0)) revert BidsAlreadyPlaced();
-
-        a.canceled = true;
-
-        IERC721(a.nftAddress).safeTransferFrom(
-            address(this),
-            a.owner,
-            a.tokenId
-        );
-
-        emit AuctionCancelled(_auctionId);
     }
 
     function _minutes(uint256 m) internal pure returns (uint256) {
@@ -506,9 +505,9 @@ contract SealedBidAuctions is
     ) external view returns (AuctionView memory) {
         Auction memory a = auctions[_auctionId];
 
-        address highestBidder = address(0);
-        uint256 highestBid = 0;
-        uint256 totalBids = 0;
+        address highestBidder;
+        uint256 highestBid;
+        uint256 totalBids;
 
         if (a.settled) {
             highestBidder = a.highestBidder;
@@ -529,31 +528,50 @@ contract SealedBidAuctions is
                 highestBid: highestBid,
                 totalBids: totalBids,
                 settled: a.settled,
-                cancelled: a.canceled
+                success: a.success
             });
     }
 
-    function getAuctionOwnerView(
-        uint256 _auctionId
-    ) external view returns (AuctionOwnerView memory) {
-        Auction memory a = auctions[_auctionId];
+    function getAuctionOwner(
+        address creator
+    ) external view returns (AuctionCreatorView[] memory) {
+        uint256[] memory aIds = auctionsCreated[creator];
+        uint256 len = aIds.length;
+        AuctionCreatorView[] memory views = new AuctionCreatorView[](len);
 
-        // Default values if not settled
-        uint256 proceeds = 0;
-        bool claimed = false;
+        for (uint256 i; i < len; i++) {
+            uint256 aId = aIds[i];
+            Auction memory a = auctions[aId];
+            PendingPayment memory p = pendingPayment[aId][a.owner];
 
-        if (a.settled && !a.canceled) {
-            PendingPayment memory p = pendingPayment[_auctionId][a.owner];
-            proceeds = p.amount;
-            claimed = p.claimed;
+            address highestBidder;
+            uint256 highestBid;
+            uint256 totalBids;
+            uint256 proceeds;
+            bool claimed = false;
+
+            if (a.settled && a.success) {
+                proceeds = p.amount;
+                claimed = p.claimed;
+                highestBidder = a.highestBidder;
+                highestBid = a.highestBid;
+                totalBids = a.totalBids;
+            }
+
+            views[i] = AuctionCreatorView({
+                nftAddress: a.nftAddress,
+                highestBidder: highestBidder,
+                highestBid: highestBid,
+                totalBids: totalBids,
+                tokenId: a.tokenId,
+                sellerProceeds: proceeds,
+                settled: a.settled,
+                success: a.success,
+                claimed: p.claimed
+            });
         }
 
-        return
-            AuctionOwnerView({
-                owner: a.owner,
-                sellerProceeds: proceeds,
-                claimed: claimed
-            });
+        return views;
     }
 
     function getBidder(
