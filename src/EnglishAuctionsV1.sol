@@ -39,20 +39,6 @@ contract RaiseXNftAuctionPlatform is
 {
     using SafeERC20 for IERC20;
 
-    // enum AuctionType {
-    //     ENGLISH_AUCTION,
-    //     DUTCH_AUCTION
-    // }
-
-    // struct DutchAuction {
-    //     address creator;
-    //     uint256 initialPrice;
-    //     uint256 discountRate;
-    //     uint256 minPrice;
-    //     uint256 startTime;
-    //     uint256 endTime;
-    // }
-
     struct Auction {
         address owner;
         address highestBidder;
@@ -129,6 +115,8 @@ contract RaiseXNftAuctionPlatform is
         platformFeeRecipient = _initialOwner;
     }
 
+// Everyone place their bids blindly, at the end of the auction event, the highest bid and bidder is revealed
+// if there is a reserve price set, the first bidder to pay it will win the auction bidder and bid will be revealed
     function createAuction(
         address _nftAddress,
         uint256 _tokenId,
