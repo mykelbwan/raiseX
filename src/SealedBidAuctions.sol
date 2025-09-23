@@ -86,15 +86,19 @@ contract SealedBidAuctions is
         uint256 minBidUnit;
         uint256 highestBid;
         uint256 totalBids;
-        uint32 platformFee;
         bool settled;
         bool cancelled;
     }
 
     struct BidderAuctionView {
+        address highestBidder;
+        address nftAddress;
         uint256 userBid;
-        bool won; // true if bidder won the auction
+        uint256 tokenId;
+        uint256 highestBid;
+        uint256 totalBids;
         uint256 claimableRefund; // refund amount (0 if none)
+        bool won; // true if bidder won the auction
         bool claimed; // true if refund already claimed
     }
 
@@ -525,8 +529,7 @@ contract SealedBidAuctions is
                 highestBid: highestBid,
                 totalBids: totalBids,
                 settled: a.settled,
-                cancelled: a.canceled,
-                platformFee: PLATFORM_FEE
+                cancelled: a.canceled
             });
     }
 
@@ -566,7 +569,10 @@ contract SealedBidAuctions is
             Auction memory a = auctions[aId];
             Bids memory b = bids[aId][bidder];
 
-            uint256 refundAmount = 0;
+            address highestBidder;
+            uint256 highestBid;
+            uint256 totalBids;
+            uint256 refundAmount;
             bool refundClaimed = false;
 
             if (a.settled && !b.won) {
@@ -574,8 +580,18 @@ contract SealedBidAuctions is
                 refundAmount = r.amount;
                 refundClaimed = r.claimed;
             }
+            if (a.settled) {
+                highestBidder = a.highestBidder;
+                highestBid = a.highestBid;
+                totalBids = a.totalBids;
+            }
 
             views[i] = BidderAuctionView({
+                nftAddress: a.nftAddress,
+                highestBidder: highestBidder,
+                tokenId: a.tokenId,
+                highestBid: highestBid,
+                totalBids: totalBids,
                 userBid: b.bid,
                 won: b.won,
                 claimableRefund: refundAmount,
