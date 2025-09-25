@@ -22,7 +22,6 @@ error NoRefund();
 error AuctionNotStarted();
 error AuctionEnded();
 error AuctionAlreadySettled();
-error BidsAlreadyPlaced();
 error AuctionStillActive();
 error BidTooLow();
 error NotNftOwner();
