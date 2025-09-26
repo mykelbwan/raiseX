@@ -259,7 +259,7 @@ contract SealedBidAuctions is
 
         a.totalBids += amountIn;
         // Update bidder's total bid
-        Bids storage bid = bids[a.auctionId][bidder];
+        Bids storage bid = bids[_auctionId][bidder];
         bid.bid += amountIn;
         address prevHighest = a.highestBidder;
         AuctionRefund storage r = auctionRefunds[_auctionId][prevHighest];
@@ -271,7 +271,7 @@ contract SealedBidAuctions is
 
         // Handle previous highest bidder
         if (prevHighest != address(0) && prevHighest != bidder) {
-            bids[a.auctionId][prevHighest].won = false;
+            bids[_auctionId][prevHighest].won = false;
 
             r.bidder = prevHighest;
             r.token = a.paymentToken;
@@ -418,7 +418,7 @@ contract SealedBidAuctions is
             IERC20 token = IERC20(r.token);
             token.safeTransfer(bidder, amount);
         }
-        emit Refund(a.auctionId, amount);
+        emit Refund(_auctionId, amount);
     }
 
     function _minutes(uint256 m) internal pure returns (uint256) {
