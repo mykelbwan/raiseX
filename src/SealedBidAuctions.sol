@@ -258,16 +258,17 @@ contract SealedBidAuctions is
         if (amountIn < minRequiredBid) revert BidTooLow();
 
         a.totalBids += amountIn;
-        // Update bidder's total bid
+
         Bids storage bid = bids[_auctionId][bidder];
-        bid.bid += amountIn;
+
         address prevHighest = a.highestBidder;
         AuctionRefund storage r = auctionRefunds[_auctionId][prevHighest];
 
-        if (bids[_auctionId][bidder].bid == 0) {
-            // first time this bidder joins this auction
+        if (bid.bid == 0) {
             bidderAuctions[bidder].push(_auctionId);
         }
+
+        bid.bid += amountIn;
 
         // Handle previous highest bidder
         if (prevHighest != address(0) && prevHighest != bidder) {
@@ -398,7 +399,6 @@ contract SealedBidAuctions is
         Auction storage a = auctions[_auctionId];
 
         if (!a.settled) revert AuctionNotSettled();
-        if (!a.success) revert NoRefund();
 
         address bidder = msg.sender;
         AuctionRefund storage r = auctionRefunds[_auctionId][bidder];
@@ -406,9 +406,9 @@ contract SealedBidAuctions is
         if (r.claimed) revert AlreadyClaimed();
         if (r.amount == 0) revert ErrorInvalidAmount();
 
-        r.claimed = true;
         uint256 amount = r.amount;
         r.amount = 0;
+        r.claimed = true;
 
         if (r.token == address(0)) {
             (bool ok, ) = payable(bidder).call{value: amount}("");
