@@ -172,7 +172,6 @@ contract SealedBidAuctions is
     ) external nonReentrant {
         if (paused()) revert ContractPaused();
         if (_durationMinutes == 0) revert InvalidEndTime();
-        if (_reservePrice == 0) revert InvalidReservePrice();
 
         uint256 startTime = block.timestamp + _minutes(_startDelayMinutes);
         uint256 endTime = startTime + _minutes(_durationMinutes);
