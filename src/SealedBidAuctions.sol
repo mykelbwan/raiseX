@@ -91,15 +91,15 @@ contract SealedBidAuctions is
     }
 
     struct BidderAuctionView {
-        address highestBidder;
         address nftAddress;
-        uint256 userBid;
+        address highestBidder;
         uint256 tokenId;
         uint256 highestBid;
         uint256 totalBids;
-        uint256 claimableRefund; // refund amount (0 if none)
-        bool won; // true if bidder won the auction
-        bool claimed; // true if refund already claimed
+        uint256 userBid;
+        bool won;
+        uint256 claimableRefund;
+        bool claimed;
         bool settled;
     }
 
