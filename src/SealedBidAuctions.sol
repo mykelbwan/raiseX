@@ -100,6 +100,7 @@ contract SealedBidAuctions is
         uint256 claimableRefund; // refund amount (0 if none)
         bool won; // true if bidder won the auction
         bool claimed; // true if refund already claimed
+        bool settled;
     }
 
     struct AuctionCreatorView {
@@ -542,10 +543,10 @@ contract SealedBidAuctions is
             Auction memory a = auctions[aId];
             PendingPayment memory p = pendingPayment[aId][a.owner];
 
-            address highestBidder;
-            uint256 highestBid;
-            uint256 totalBids;
-            uint256 proceeds;
+            address highestBidder = address(0);
+            uint256 highestBid = 0;
+            uint256 totalBids = 0;
+            uint256 proceeds = 0;
             bool claimed = false;
 
             if (a.settled && a.success) {
@@ -585,11 +586,12 @@ contract SealedBidAuctions is
             Auction memory a = auctions[aId];
             Bids memory b = bids[aId][bidder];
 
-            address highestBidder;
-            uint256 highestBid;
-            uint256 totalBids;
-            uint256 refundAmount;
+            address highestBidder = address(0);
+            uint256 highestBid = 0;
+            uint256 totalBids = 0;
+            uint256 refundAmount = 0;
             bool refundClaimed = false;
+            bool won = false;
 
             if (a.settled && !b.won) {
                 AuctionRefund memory r = auctionRefunds[aId][bidder];
@@ -600,6 +602,7 @@ contract SealedBidAuctions is
                 highestBidder = a.highestBidder;
                 highestBid = a.highestBid;
                 totalBids = a.totalBids;
+                won = b.won;
             }
 
             views[i] = BidderAuctionView({
@@ -609,9 +612,10 @@ contract SealedBidAuctions is
                 highestBid: highestBid,
                 totalBids: totalBids,
                 userBid: b.bid,
-                won: b.won,
+                won: won,
                 claimableRefund: refundAmount,
-                claimed: refundClaimed
+                claimed: refundClaimed,
+                settled: a.settled
             });
         }
         return views;
