@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {ContractTransparencyConfig} from "./Interface/ContractTransparencyConfig.sol";
+import {ContractTransparencyConfig} from "../Interface/ContractTransparencyConfig.sol";
 
 error GuessingGame__DepositRequired();
 error GuessingGame__MaxGuessesReached();

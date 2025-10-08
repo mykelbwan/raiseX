@@ -3,4 +3,4 @@ Best practice in writing smart contracts that hold peoples money
     effects 
     interaction
 
-Write code with security im mind
+Write code with security in mind

@@ -97,7 +97,6 @@ contract GoFundMe is ContractTransparencyConfig {
 
         if (block.timestamp > c.endTime) revert CampaignEnded();
         if (amount < 0) revert ZeroAmount();
-        if (c.fundingTarget >= c.raisedAmount) revert TargetMet();
         c.raisedAmount += amount;
         emit Funded(msg.sender, _campaignId, amount);
     }
@@ -192,7 +191,7 @@ contract GoFundMe is ContractTransparencyConfig {
             Campaign memory c = campaigns[cId];
             bool ended = block.timestamp >= c.endTime;
 
-            viewC[i] =  ViewCampaignCreator({
+            viewC[i] = ViewCampaignCreator({
                 campaignId: c.campaignId,
                 raisedAmt: c.raisedAmount,
                 des: c.description,
